@@ -11,6 +11,154 @@ const BookingService = require('./services/booking.service');
 const DijkstraService = require('./services/dijkstra.service');
 const DashboardController = require('./controllers/dashboard.controller');
 const PDFGeneratorService = require('./services/pdf-generator.service');
+const QRCode              = require('qrcode');
+const os                  = require('os');
+const jwt                 = require('jsonwebtoken');
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the best public base URL for QR codes.
+ * Priority: PUBLIC_URL env → LAN IP (192.168/10.) → request host.
+ */
+function getPublicBaseUrl(req) {
+    if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
+
+    const nets = os.networkInterfaces();
+    // Prefer 192.168.x.x  then  10.x.x.x   (avoid Docker 172.x, Tailscale 100.x)
+    const candidates = [];
+    for (const ifaces of Object.values(nets)) {
+        for (const net of ifaces) {
+            if (net.family !== 'IPv4' || net.internal) continue;
+            if (net.address.startsWith('192.168.')) { candidates.unshift(net.address); break; }
+            if (net.address.startsWith('10.'))       candidates.push(net.address);
+        }
+    }
+    if (candidates.length > 0) return `http://${candidates[0]}:${PORT}`;
+
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    return `${proto}://${req.get('host')}`;
+}
+
+/**
+ * Build a "Save to Google Wallet" URL signed with a service-account JWT.
+ * Returns null if the required env vars are not configured.
+ *
+ * Required env vars (set in .env):
+ *   GOOGLE_WALLET_ISSUER_ID          — numeric issuer ID from Google Pay Console
+ *   GOOGLE_SERVICE_ACCOUNT_EMAIL     — service account e-mail
+ *   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY — RSA private key (replace \n with actual newlines)
+ *   (or) GOOGLE_SERVICE_ACCOUNT_KEY_FILE — path to service-account JSON key file
+ */
+function buildGoogleWalletUrl(data) {
+    let svcEmail, privateKey;
+    const issuerId = process.env.GOOGLE_WALLET_ISSUER_ID;
+
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
+        try {
+            const kp = path.resolve(process.cwd(), process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE);
+            const k  = JSON.parse(fs.readFileSync(kp, 'utf8'));
+            svcEmail   = k.client_email;
+            privateKey = k.private_key;
+        } catch { /* file not found or invalid */ }
+    }
+    if (!svcEmail)   svcEmail   = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    if (!privateKey) privateKey = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+    if (!issuerId || !svcEmail || !privateKey || !privateKey.includes('BEGIN')) return null;
+
+    try {
+        // Parse "RP104" → carrier "RP", number "104"
+        const fnMatch     = /^([A-Z]{2,3})\s*(\d+)$/i.exec(String(data.flightNumber || '').trim());
+        const carrierCode = fnMatch ? fnMatch[1].toUpperCase() : 'AP';
+        const flightNum   = fnMatch ? fnMatch[2] : String(data.flightNumber || '');
+
+        // Build "YYYY-MM-DDTHH:MM:00" — required field for Google Wallet FlightClass
+        let depDate = '';
+        try {
+            const raw = data.departureDate;
+            const iso = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
+            depDate   = iso.substring(0, 10); // "YYYY-MM-DD" always
+        } catch { /* ignore */ }
+        if (!depDate || !/^\d{4}-\d{2}-\d{2}$/.test(depDate))
+            depDate = new Date().toISOString().substring(0, 10);
+
+        let depTime = '00:00';
+        try {
+            const rt = String(data.departureTime || data.fmtTime || '');
+            if (rt) depTime = rt.substring(0, 5);   // "17:59" from "17:59:00"
+        } catch { /* ignore */ }
+
+        const localDT = `${depDate}T${depTime}:00`; // always defined — required by API
+        console.log(`[GoogleWallet] localScheduledDepartureDateTime = ${localDT}`);
+
+        // Unique class per route+date to avoid conflicts across flights
+        const safeDate    = (depDate || 'nodate').replace(/-/g, '');
+        const classId     = `${issuerId}.${carrierCode}${flightNum}_${safeDate}`;
+        const objectId    = `${issuerId}.${String(data.ticketNumber).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+        const isFirst    = data.classType === 'FIRST';
+        const classLabel = isFirst ? 'First Class' : 'Economy';
+        const hexBg      = isFirst ? '#7C2D12' : '#1E3A8A';
+
+        const passPayload = {
+            flightClasses: [{
+                id:           classId,
+                issuerName:   'Aerolineas Pabon',
+                reviewStatus: 'APPROVED',
+                hexBackgroundColor: hexBg,
+                flightHeader: {
+                    carrier: {
+                        carrierIataCode: carrierCode,
+                        airlineName: { defaultValue: { language: 'en-US', value: 'Aerolineas Pabon' } },
+                    },
+                    flightNumber:                flightNum,
+                    flightNumberDisplayOverride: String(data.flightNumber || ''),
+                },
+                origin: {
+                    airportIataCode: String(data.origin      || ''),
+                    gate:            String(data.gate        || ''),
+                },
+                destination: {
+                    airportIataCode: String(data.destination || ''),
+                },
+                localScheduledDepartureDateTime: localDT,
+            }],
+            flightObjects: [{
+                id:                 objectId,
+                classId:            classId,
+                state:              'ACTIVE',
+                hexBackgroundColor: hexBg,
+                passengerName:      String(data.passengerName || '').toUpperCase(),
+                reservationInfo:    { confirmationCode: String(data.ticketNumber || '') },
+                boardingAndSeatingInfo: {
+                    seatNumber: String(data.seatNumber || ''),
+                    seatClass:  classLabel,
+                },
+                barcode: {
+                    type:          'QR_CODE',
+                    value:         String(data.ticketNumber || ''),
+                    alternateText: String(data.ticketNumber || ''),
+                },
+                textModulesData: [
+                    { id: 'gate',  header: 'GATE',  body: String(data.gate  || 'TBD') },
+                    { id: 'class', header: 'CLASS', body: classLabel },
+                ],
+            }],
+        };
+
+        const token = jwt.sign(
+            { iss: svcEmail, aud: 'google', typ: 'savetowallet', payload: passPayload,
+              iat: Math.floor(Date.now() / 1000) },
+            privateKey,
+            { algorithm: 'RS256' }
+        );
+        return `https://pay.google.com/gp/v/save/${token}`;
+    } catch (err) {
+        console.error('[GoogleWallet] JWT error:', err.message);
+        return null;
+    }
+}
 const { connectMongoDB } = require('./config/database/mongodb');
 const { connectRedis } = require('./config/database/redis');
 const pool = require('./config/database/postgres');
@@ -287,6 +435,76 @@ app.post('/api/v1/routes/multi-destination', (req, res) => {
 });
 
 // ============================================
+// API ENDPOINTS - VUELOS
+// ============================================
+
+app.get('/api/v1/flights', async (req, res) => {
+    const { origin, destination, date } = req.query;
+    try {
+        let query = 'SELECT * FROM flights WHERE 1=1';
+        const params = [];
+
+        if (origin) {
+            params.push(origin.toUpperCase());
+            query += ` AND origin_code = $${params.length}`;
+        }
+        if (destination) {
+            params.push(destination.toUpperCase());
+            query += ` AND destination_code = $${params.length}`;
+        }
+        if (date) {
+            params.push(date);
+            query += ` AND departure_date = $${params.length}`;
+        }
+
+        query += ' ORDER BY departure_date, departure_time';
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/v1/flights/:flightId/seats', async (req, res) => {
+    const { flightId } = req.params;
+    try {
+        const flightResult = await pool.query(
+            'SELECT f.*, a.first_class_seats, a.economy_seats FROM flights f LEFT JOIN aircrafts a ON f.aircraft_id = a.id WHERE f.id = $1',
+            [flightId]
+        );
+        if (flightResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Vuelo no encontrado' });
+        }
+
+        const flight = flightResult.rows[0];
+        const columns = ['A', 'B', 'C', 'D', 'E', 'F'];
+        const firstClassRows = Math.ceil((flight.first_class_seats || 12) / columns.length);
+        const economyRows = Math.ceil((flight.economy_seats || 120) / columns.length);
+
+        const SeatState = require('./models/mongodb/SeatState.model');
+        const seatStates = await SeatState.find({ flight_id: parseInt(flightId) });
+        const stateMap = {};
+        seatStates.forEach(s => { stateMap[s.seat_number] = s.status; });
+
+        const seats = [];
+        for (let row = 1; row <= firstClassRows + economyRows; row++) {
+            for (const col of columns) {
+                const seatNumber = row + col;
+                seats.push({
+                    seat_number: seatNumber,
+                    class_type: row <= firstClassRows ? 'FIRST' : 'ECONOMY',
+                    status: stateMap[seatNumber] || 'AVAILABLE'
+                });
+            }
+        }
+
+        res.json({ flightId: parseInt(flightId), seats });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================
 // API ENDPOINTS - DASHBOARD GERENCIAL
 // ============================================
 
@@ -317,53 +535,54 @@ app.get('/api/v1/dashboard/top-routes', async (req, res) => {
 
 app.get('/api/v1/boarding-pass/pdf', async (req, res) => {
     const { ticket } = req.query;
-    
+
     if (!ticket) {
         return res.status(400).json({ error: 'ticket es requerido' });
     }
-    
+
     try {
         const sale = await pool.query(
-            `SELECT s.*, f.flight_number, f.origin_code, f.destination_code, f.departure_date, f.departure_time, f.gate,
-             p.first_name, p.last_name, p.passport_number
+            `SELECT s.ticket_number, s.seat_number, s.class_type, s.price_paid, s.booking_reference,
+                    f.flight_number, f.origin_code, f.destination_code,
+                    f.departure_date, f.departure_time, f.gate, f.flight_duration_hours,
+                    p.first_name, p.last_name, p.passport_number
              FROM sales s
              JOIN flights f ON s.flight_id = f.id
              JOIN passengers p ON s.passenger_id = p.id
              WHERE s.ticket_number = $1`,
             [ticket]
         );
-        
+
         if (sale.rows.length === 0) {
             return res.status(404).json({ error: 'Ticket no encontrado' });
         }
-        
+
         const data = sale.rows[0];
-        
+
         const result = await pdfGenerator.generateBoardingPass({
-            ticketNumber: data.ticket_number,
-            passengerName: data.first_name + ' ' + data.last_name,
-            passportNumber: data.passport_number,
-            flightNumber: data.flight_number,
-            origin: data.origin_code,
-            destination: data.destination_code,
-            departureDate: data.departure_date,
-            departureTime: data.departure_time,
-            seatNumber: data.seat_number,
-            classType: data.class_type,
-            gate: data.gate,
-            boardingTime: data.departure_time,
-            price: data.price_paid
+            ticketNumber:     data.ticket_number,
+            passengerName:    data.first_name + ' ' + data.last_name,
+            passportNumber:   data.passport_number,
+            flightNumber:     data.flight_number,
+            origin:           data.origin_code,
+            destination:      data.destination_code,
+            departureDate:    data.departure_date,
+            departureTime:    data.departure_time,
+            seatNumber:       data.seat_number,
+            classType:        data.class_type,
+            gate:             data.gate,
+            price:            data.price_paid,
+            durationHours:    data.flight_duration_hours,
+            bookingReference: data.booking_reference,
         });
-        
+
         if (result.success) {
+            res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+            res.setHeader('Content-Type', 'application/pdf');
             res.download(result.filePath, result.filename, (err) => {
-                if (err) {
-                    console.error('[PDF] Error sending file:', err);
-                }
+                if (err) console.error('[PDF] Error sending file:', err);
                 setTimeout(() => {
-                    if (fs.existsSync(result.filePath)) {
-                        fs.unlinkSync(result.filePath);
-                    }
+                    if (fs.existsSync(result.filePath)) fs.unlinkSync(result.filePath);
                 }, 5000);
             });
         } else {
@@ -377,54 +596,187 @@ app.get('/api/v1/boarding-pass/pdf', async (req, res) => {
 
 app.get('/api/v1/boarding-pass/wallet', async (req, res) => {
     const { ticket } = req.query;
-    
-    if (!ticket) {
-        return res.status(400).json({ error: 'ticket es requerido' });
-    }
-    
+    if (!ticket) return res.status(400).json({ error: 'ticket es requerido' });
+
     try {
         const sale = await pool.query(
-            `SELECT s.*, f.flight_number, f.origin_code, f.destination_code, f.departure_date, f.departure_time, f.gate,
-             p.first_name, p.last_name
+            `SELECT s.ticket_number, s.seat_number, s.class_type, s.price_paid,
+                    f.flight_number, f.origin_code, f.destination_code,
+                    f.departure_date, f.departure_time, f.gate, f.flight_duration_hours,
+                    p.first_name, p.last_name, p.passport_number
              FROM sales s
              JOIN flights f ON s.flight_id = f.id
              JOIN passengers p ON s.passenger_id = p.id
              WHERE s.ticket_number = $1`,
             [ticket]
         );
-        
-        if (sale.rows.length === 0) {
-            return res.status(404).json({ error: 'Ticket no encontrado' });
-        }
-        
-        const data = sale.rows[0];
-        
-        const result = await pdfGenerator.generateWalletPass({
-            ticketNumber: data.ticket_number,
-            passengerName: data.first_name + ' ' + data.last_name,
-            flightNumber: data.flight_number,
-            origin: data.origin_code,
-            destination: data.destination_code,
-            departureDate: data.departure_date,
-            departureTime: data.departure_time,
-            seatNumber: data.seat_number,
-            gate: data.gate
+        if (sale.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
+
+        const d = sale.rows[0];
+        const passengerName = `${d.first_name} ${d.last_name}`;
+
+        // ── View URL using LAN IP (works on any phone on the same WiFi) ──
+        const baseUrl = getPublicBaseUrl(req);
+        const viewUrl = `${baseUrl}/api/v1/boarding-pass/view?ticket=${encodeURIComponent(ticket)}`;
+
+        // ── QR code pointing to the view page ── (large, high-contrast, easy to scan)
+        const qrBuffer = await QRCode.toBuffer(viewUrl, {
+            errorCorrectionLevel: 'M',
+            margin: 3,
+            width: 400,
+            color: { dark: '#142258', light: '#ffffff' },
         });
-        
-        if (result.success) {
-            res.json({
-                success: true,
-                walletPass: result.passData,
-                qrCode: result.qrCode,
-                instructions: 'Escanea el código QR para agregar el pase a tu Wallet',
-                message: 'Wallet pass generado exitosamente'
-            });
-        } else {
-            res.status(500).json({ error: result.error });
-        }
+        const qrCode = `data:image/png;base64,${qrBuffer.toString('base64')}`;
+
+        // ── Format date/time for Google Wallet ──
+        let fmtDate = '';
+        try {
+            const raw  = d.departure_date;
+            const iso  = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
+            const dt   = new Date(iso.substring(0, 10) + 'T12:00:00Z');
+            fmtDate    = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+        } catch { fmtDate = String(d.departure_date || ''); }
+
+        // ── Google Wallet JWT (returns null if not configured) ──
+        const googleWalletUrl = buildGoogleWalletUrl({
+            ticketNumber:  d.ticket_number,
+            passengerName,
+            flightNumber:  d.flight_number,
+            origin:        d.origin_code,
+            destination:   d.destination_code,
+            departureDate: d.departure_date,
+            departureTime: d.departure_time,
+            fmtDate,
+            seatNumber:    d.seat_number,
+            classType:     d.class_type,
+            gate:          d.gate,
+        });
+
+        res.json({
+            success:          true,
+            qrCode,
+            viewUrl,
+            googleWalletUrl,                    // null → frontend shows web view only
+            hasGoogleWallet:  !!googleWalletUrl,
+            instructions:     'Scan QR to open your boarding pass, or tap the Google Wallet button on Android',
+        });
     } catch (error) {
         console.error('[Wallet] Error:', error);
         res.status(500).json({ error: error.message });
+    }
+});
+
+// ── Digital boarding pass view (Liquid Glass mobile page) ────────────────────
+app.get('/api/v1/boarding-pass/view', async (req, res) => {
+    const { ticket } = req.query;
+    if (!ticket) return res.status(400).send('<h1>Ticket number required</h1>');
+
+    try {
+        const result = await pool.query(
+            `SELECT s.ticket_number, s.seat_number, s.class_type, s.price_paid, s.booking_reference,
+                    f.flight_number, f.origin_code, f.destination_code,
+                    f.departure_date, f.departure_time, f.gate, f.flight_duration_hours,
+                    p.first_name, p.last_name, p.passport_number
+             FROM sales s
+             JOIN flights f ON s.flight_id = f.id
+             JOIN passengers p ON s.passenger_id = p.id
+             WHERE s.ticket_number = $1`,
+            [ticket]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).send('<h1>Ticket not found</h1>');
+        }
+
+        const d = result.rows[0];
+
+        const CITIES = {
+            ATL:'Atlanta, USA',DFW:'Dallas, USA',LON:'London, UK',LHR:'London, UK',
+            PEK:'Beijing, China',DXB:'Dubai, UAE',TYO:'Tokyo, Japan',NRT:'Tokyo, Japan',
+            PAR:'Paris, France',CDG:'Paris, France',LAX:'Los Angeles, USA',JFK:'New York, USA',
+            FRA:'Frankfurt, Germany',IST:'Istanbul, Turkey',SIN:'Singapore',MAD:'Madrid, Spain',
+            AMS:'Amsterdam, NL',CAN:'Guangzhou, China',SAO:'Sao Paulo, Brazil',
+            SYD:'Sydney, Australia',BOG:'Bogota, Colombia',MIA:'Miami, USA',ORD:'Chicago, USA',
+        };
+
+        // Format date
+        let fmtDate = '';
+        try {
+            const raw  = d.departure_date;
+            const iso  = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
+            const dt   = new Date(iso.substring(0, 10) + 'T12:00:00Z');
+            fmtDate    = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+        } catch { fmtDate = String(d.departure_date || ''); }
+
+        const fmtTime = (d.departure_time || '').substring(0, 5);
+
+        let duration = '';
+        if (d.flight_duration_hours) {
+            const h = Math.floor(Number(d.flight_duration_hours));
+            const m = Math.round((Number(d.flight_duration_hours) - h) * 60);
+            duration = m > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${h}h`;
+        }
+
+        const passengerName = `${d.first_name} ${d.last_name}`;
+        const price = '$' + parseFloat(d.price_paid || 0).toLocaleString();
+
+        // QR for stub area encodes booking data
+        const qrBuffer = await QRCode.toBuffer(JSON.stringify({
+            ticket:    d.ticket_number,
+            flight:    d.flight_number,
+            passenger: passengerName,
+            seat:      d.seat_number,
+            from:      d.origin_code,
+            to:        d.destination_code,
+            date:      fmtDate,
+            gate:      d.gate,
+            class:     d.class_type,
+        }), { errorCorrectionLevel: 'M', width: 240, margin: 2,
+              color: { dark: '#0D1B4B', light: '#ffffff' } });
+        const qrDataUrl = `data:image/png;base64,${qrBuffer.toString('base64')}`;
+
+        // Google Wallet URL (so the view page can show the button on Android)
+        const googleWalletUrl = buildGoogleWalletUrl({
+            ticketNumber:  d.ticket_number,
+            passengerName,
+            flightNumber:  d.flight_number,
+            origin:        d.origin_code,
+            destination:   d.destination_code,
+            departureDate: d.departure_date,
+            departureTime: d.departure_time,
+            fmtDate,
+            seatNumber:    d.seat_number,
+            classType:     d.class_type,
+            gate:          d.gate,
+        });
+
+        const html = pdfGenerator.generateViewHtml({
+            ticketNumber:     d.ticket_number,
+            passengerName,
+            passportNumber:   d.passport_number,
+            flightNumber:     d.flight_number,
+            origin:           d.origin_code,
+            destination:      d.destination_code,
+            originCity:       CITIES[d.origin_code]      || '',
+            destCity:         CITIES[d.destination_code] || '',
+            fmtDate,
+            fmtTime,
+            duration,
+            seatNumber:       d.seat_number,
+            classType:        d.class_type,
+            gate:             d.gate,
+            price,
+            bookingReference: d.booking_reference,
+            googleWalletUrl:  googleWalletUrl || '',
+        }, qrDataUrl);
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(html);
+
+    } catch (error) {
+        console.error('[View] Error:', error);
+        res.status(500).send('<h1>Error loading boarding pass</h1>');
     }
 });
 
@@ -492,6 +844,30 @@ const startServer = async () => {
             console.log('--- PDF Y WALLET (10 pts) ---');
             console.log('  GET  /api/v1/boarding-pass/pdf?ticket=');
             console.log('  GET  /api/v1/boarding-pass/wallet?ticket=');
+            console.log('');
+
+            // ── Google Wallet config check ──────────────────────────────────
+            const gwIssuerId = process.env.GOOGLE_WALLET_ISSUER_ID;
+            const gwKeyFile  = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE;
+            if (!gwIssuerId && !gwKeyFile) {
+                console.log('[GoogleWallet] ⚠  No configurado — el boton no aparecera');
+            } else {
+                let gwEmail = null, gwKeyOk = false;
+                try {
+                    const kp = path.resolve(__dirname, '..', gwKeyFile || '');
+                    const k  = JSON.parse(fs.readFileSync(kp, 'utf8'));
+                    gwEmail  = k.client_email;
+                    gwKeyOk  = !!(k.private_key && k.private_key.includes('BEGIN'));
+                } catch (e) { /* fallback to env vars */ }
+                if (!gwEmail) gwEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(no configurado)';
+                console.log('[GoogleWallet] Issuer ID : ' + (gwIssuerId || '(FALTANTE)'));
+                console.log('[GoogleWallet] Account   : ' + gwEmail);
+                console.log('[GoogleWallet] Key file  : ' + (gwKeyOk ? 'OK' : 'ERROR - no se pudo leer'));
+                if (gwIssuerId && gwEmail && gwKeyOk)
+                    console.log('[GoogleWallet] Estado    : LISTO');
+                else
+                    console.log('[GoogleWallet] Estado    : INCOMPLETO - revisa las vars de entorno');
+            }
             console.log('');
         });
         
