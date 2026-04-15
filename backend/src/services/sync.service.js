@@ -64,29 +64,27 @@ class SyncService {
     }
     
     async broadcast(type, data) {
-        if (!this.channel) return false;
-        
-        try {
-            this.vectorClock.increment();
-            const currentClock = this.vectorClock.getClock();
-            
-            const message = {
-                type: type,
-                data: data,
-                senderNodeId: this.nodeId,
-                senderClock: JSON.stringify(currentClock),
-                timestamp: new Date().toISOString()
-            };
-            
-            this.channel.publish(this.exchangeName, '', Buffer.from(JSON.stringify(message)));
-            console.log('[Sync] Broadcast enviado: ' + type);
-            return true;
-        } catch (error) {
-            console.error('[Sync] Error:', error);
-            return false;
-        }
+    if (!this.channel) return false;
+
+    try {
+        const currentClock = data.vectorClock || this.vectorClock.getClock();
+
+        const message = {
+            type: type,
+            data: data,
+            senderNodeId: this.nodeId,
+            senderClock: JSON.stringify(currentClock),
+            timestamp: new Date().toISOString()
+        };
+
+        this.channel.publish(this.exchangeName, '', Buffer.from(JSON.stringify(message)));
+        console.log('[Sync] Broadcast enviado: ' + type);
+        return true;
+    } catch (error) {
+        console.error('[Sync] Error:', error);
+        return false;
     }
-    
+}
     on(type, handler) {
         this.handlers.set(type, handler);
     }

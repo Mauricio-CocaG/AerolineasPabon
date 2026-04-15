@@ -296,13 +296,18 @@ app.get('/api/v1/seat/availability', async (req, res) => {
 
 app.post('/api/v1/seat/reserve', async (req, res) => {
     const { flightId, seatNumber, passengerId, classType } = req.body;
-    
+
     if (!flightId || !seatNumber || !passengerId || !classType) {
         return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
-    
-    const result = await bookingService.reserveSeat(flightId, seatNumber, passengerId, classType);
-    
+
+    const result = await bookingService.reserveSeat(
+        parseInt(flightId),
+        seatNumber,
+        parseInt(passengerId),
+        classType
+    );
+
     if (result.success) {
         res.json(result);
     } else {
@@ -312,13 +317,25 @@ app.post('/api/v1/seat/reserve', async (req, res) => {
 
 app.post('/api/v1/seat/sell', async (req, res) => {
     const { flightId, seatNumber, passengerId, classType, price } = req.body;
-    
-    if (!flightId || !seatNumber || !passengerId || !classType || !price) {
+
+    if (
+        flightId === undefined ||
+        !seatNumber ||
+        passengerId === undefined ||
+        !classType ||
+        price === undefined
+    ) {
         return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
-    
-    const result = await bookingService.sellSeat(flightId, seatNumber, passengerId, classType, price);
-    
+
+    const result = await bookingService.sellSeat(
+        parseInt(flightId),
+        seatNumber,
+        parseInt(passengerId),
+        classType,
+        parseFloat(price)
+    );
+
     if (result.success) {
         res.json(result);
     } else {
@@ -328,13 +345,17 @@ app.post('/api/v1/seat/sell', async (req, res) => {
 
 app.post('/api/v1/seat/refund', async (req, res) => {
     const { flightId, seatNumber, passengerId } = req.body;
-    
+
     if (!flightId || !seatNumber || !passengerId) {
         return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
-    
-    const result = await bookingService.refundSeat(flightId, seatNumber, passengerId);
-    
+
+    const result = await bookingService.refundSeat(
+        parseInt(flightId),
+        seatNumber,
+        parseInt(passengerId)
+    );
+
     if (result.success) {
         res.json(result);
     } else {

@@ -51,7 +51,6 @@ class DashboardController {
                 revenue: revenueByClass,
                 recentActivity: recentActivity
             });
-
         } catch (error) {
             console.error('[Dashboard] Error:', error);
             res.status(500).json({ success: false, error: error.message });
@@ -66,32 +65,45 @@ class DashboardController {
             SELECT 
                 COUNT(*) as total_sales,
                 COUNT(DISTINCT passenger_id) as unique_passengers,
-                SUM(price_paid) as total_revenue,
-                AVG(price_paid) as average_ticket_price,
-                MIN(price_paid) as min_ticket,
-                MAX(price_paid) as max_ticket,
+                COALESCE(SUM(price_paid), 0) as total_revenue,
+                COALESCE(AVG(price_paid), 0) as average_ticket_price,
+                COALESCE(MIN(price_paid), 0) as min_ticket,
+                COALESCE(MAX(price_paid), 0) as max_ticket,
                 COUNT(CASE WHEN class_type = 'FIRST' THEN 1 END) as first_class_sales,
                 COUNT(CASE WHEN class_type = 'ECONOMY' THEN 1 END) as economy_sales
             FROM sales
             WHERE payment_status = 'COMPLETED'
         `);
-        
-        // Ventas por día (últimos 7 días)
+
         const dailySales = await pool.query(`
             SELECT 
                 DATE(sale_date) as date,
                 COUNT(*) as count,
-                SUM(price_paid) as revenue
+                COALESCE(SUM(price_paid), 0) as revenue
             FROM sales
             WHERE sale_date >= NOW() - INTERVAL '7 days'
+              AND payment_status = 'COMPLETED'
             GROUP BY DATE(sale_date)
             ORDER BY date DESC
         `);
 
+        const row = result.rows[0];
+
         return {
-            ...result.rows[0],
-            daily_sales: dailySales.rows,
-            total_revenue_formatted: this.formatCurrency(result.rows[0].total_revenue || 0)
+            total_sales: parseInt(row.total_sales || 0),
+            unique_passengers: parseInt(row.unique_passengers || 0),
+            total_revenue: parseFloat(row.total_revenue || 0),
+            average_ticket_price: parseFloat(row.average_ticket_price || 0),
+            min_ticket: parseFloat(row.min_ticket || 0),
+            max_ticket: parseFloat(row.max_ticket || 0),
+            first_class_sales: parseInt(row.first_class_sales || 0),
+            economy_sales: parseInt(row.economy_sales || 0),
+            daily_sales: dailySales.rows.map(item => ({
+                date: item.date,
+                count: parseInt(item.count || 0),
+                revenue: parseFloat(item.revenue || 0)
+            })),
+            total_revenue_formatted: this.formatCurrency(row.total_revenue || 0)
         };
     }
 
@@ -108,13 +120,6 @@ class DashboardController {
             }
         ]);
 
-        const statusMap = {
-            'AVAILABLE': 'libres',
-            'RESERVED': 'reservados',
-            'SOLD': 'vendidos',
-            'REFUNDED': 'en_devolucion'
-        };
-
         const result = {
             total: 0,
             available: 0,
@@ -124,15 +129,17 @@ class DashboardController {
         };
 
         stats.forEach(stat => {
-            const key = statusMap[stat._id] || stat._id.toLowerCase();
-            result[key] = stat.count;
+            const key = String(stat._id || '').toLowerCase();
+            if (result[key] !== undefined) {
+                result[key] = stat.count;
+            }
             result.total += stat.count;
         });
 
-        // Porcentajes
-        result.available_percentage = result.total > 0 ? ((result.available / result.total) * 100).toFixed(1) : 0;
-        result.sold_percentage = result.total > 0 ? ((result.sold / result.total) * 100).toFixed(1) : 0;
-        result.reserved_percentage = result.total > 0 ? ((result.reserved / result.total) * 100).toFixed(1) : 0;
+        result.available_percentage = result.total > 0 ? ((result.available / result.total) * 100).toFixed(1) : '0.0';
+        result.sold_percentage = result.total > 0 ? ((result.sold / result.total) * 100).toFixed(1) : '0.0';
+        result.reserved_percentage = result.total > 0 ? ((result.reserved / result.total) * 100).toFixed(1) : '0.0';
+        result.refunded_percentage = result.total > 0 ? ((result.refunded / result.total) * 100).toFixed(1) : '0.0';
 
         return result;
     }
@@ -145,6 +152,7 @@ class DashboardController {
             SELECT 
                 COUNT(*) as total_flights,
                 COUNT(CASE WHEN status = 'SCHEDULED' THEN 1 END) as scheduled,
+                COUNT(CASE WHEN status = 'BOARDING' THEN 1 END) as boarding,
                 COUNT(CASE WHEN status = 'DELAYED' THEN 1 END) as delayed,
                 COUNT(CASE WHEN status = 'DEPARTED' THEN 1 END) as departed,
                 COUNT(CASE WHEN status = 'IN_FLIGHT' THEN 1 END) as in_flight,
@@ -156,28 +164,43 @@ class DashboardController {
             FROM flights
         `);
 
-        // Próximos vuelos (próximas 24 horas)
         const nextFlights = await pool.query(`
             SELECT 
                 flight_number,
                 origin_code,
                 destination_code,
+                departure_date,
                 departure_time,
                 gate,
                 status
             FROM flights
-            WHERE departure_date = CURRENT_DATE 
-                AND departure_time > CURRENT_TIME
+            WHERE departure_date = CURRENT_DATE
+              AND departure_time > CURRENT_TIME
             ORDER BY departure_time ASC
             LIMIT 10
         `);
 
+        const row = result.rows[0];
+        const scheduled = parseInt(row.scheduled || 0);
+        const delayed = parseInt(row.delayed || 0);
+        const totalConsidered = scheduled + delayed;
+
         return {
-            ...result.rows[0],
+            total_flights: parseInt(row.total_flights || 0),
+            scheduled: scheduled,
+            boarding: parseInt(row.boarding || 0),
+            delayed: delayed,
+            departed: parseInt(row.departed || 0),
+            in_flight: parseInt(row.in_flight || 0),
+            landed: parseInt(row.landed || 0),
+            arrived: parseInt(row.arrived || 0),
+            cancelled: parseInt(row.cancelled || 0),
+            upcoming: parseInt(row.upcoming || 0),
+            past: parseInt(row.past || 0),
             next_flights: nextFlights.rows,
-            on_time_performance: result.rows[0].scheduled > 0 
-                ? ((result.rows[0].scheduled / (result.rows[0].scheduled + result.rows[0].delayed)) * 100).toFixed(1)
-                : 100
+            on_time_performance: totalConsidered > 0
+                ? ((scheduled / totalConsidered) * 100).toFixed(1)
+                : '100.0'
         };
     }
 
@@ -193,18 +216,22 @@ class DashboardController {
         }
 
         const vectorClock = this.syncService.getVectorClock();
-        
-        // Verificar latencia de sincronización (desde Redis)
-        const lastSync = await redisClient.get('last_sync_timestamp');
-        const lastSyncTime = lastSync ? new Date(lastSync) : null;
-        const now = new Date();
-        
+
+        let lastSync = null;
+        let lastSyncTime = null;
         let latencyMs = null;
         let isHealthy = true;
-        
-        if (lastSyncTime) {
-            latencyMs = now - lastSyncTime;
-            isHealthy = latencyMs < 10000; // Menos de 10 segundos
+
+        try {
+            lastSync = await redisClient.get('last_sync_timestamp');
+        } catch (error) {
+            console.error('[Dashboard] Error leyendo last_sync_timestamp:', error.message);
+        }
+
+        if (lastSync) {
+            lastSyncTime = new Date(lastSync);
+            latencyMs = new Date() - lastSyncTime;
+            isHealthy = latencyMs < 10000;
         }
 
         return {
@@ -215,7 +242,9 @@ class DashboardController {
             last_sync: lastSyncTime,
             latency_ms: latencyMs,
             is_healthy: isHealthy,
-            message: isHealthy ? 'Sincronización OK' : 'Latencia alta - Revisar conexiones'
+            message: lastSyncTime
+                ? (isHealthy ? 'Sincronización OK' : 'Latencia alta - Revisar conexiones')
+                : 'Sin dato reciente de sincronización'
         };
     }
 
@@ -227,29 +256,41 @@ class DashboardController {
             SELECT 
                 class_type,
                 COUNT(*) as tickets_sold,
-                SUM(price_paid) as total_revenue,
-                AVG(price_paid) as average_price
+                COALESCE(SUM(price_paid), 0) as total_revenue,
+                COALESCE(AVG(price_paid), 0) as average_price
             FROM sales
             WHERE payment_status = 'COMPLETED'
             GROUP BY class_type
         `);
 
-        const firstClass = result.rows.find(r => r.class_type === 'FIRST') || { tickets_sold: 0, total_revenue: 0, average_price: 0 };
-        const economy = result.rows.find(r => r.class_type === 'ECONOMY') || { tickets_sold: 0, total_revenue: 0, average_price: 0 };
-        const total = (firstClass.total_revenue || 0) + (economy.total_revenue || 0);
+        const firstClass = result.rows.find(r => r.class_type === 'FIRST') || {
+            tickets_sold: 0,
+            total_revenue: 0,
+            average_price: 0
+        };
+
+        const economy = result.rows.find(r => r.class_type === 'ECONOMY') || {
+            tickets_sold: 0,
+            total_revenue: 0,
+            average_price: 0
+        };
+
+        const firstRevenue = parseFloat(firstClass.total_revenue || 0);
+        const economyRevenue = parseFloat(economy.total_revenue || 0);
+        const total = firstRevenue + economyRevenue;
 
         return {
             first_class: {
-                tickets_sold: parseInt(firstClass.tickets_sold),
-                total_revenue: firstClass.total_revenue || 0,
-                average_price: firstClass.average_price || 0,
-                percentage_of_total: total > 0 ? ((firstClass.total_revenue / total) * 100).toFixed(1) : 0
+                tickets_sold: parseInt(firstClass.tickets_sold || 0),
+                total_revenue: firstRevenue,
+                average_price: parseFloat(firstClass.average_price || 0),
+                percentage_of_total: total > 0 ? ((firstRevenue / total) * 100).toFixed(1) : '0.0'
             },
             economy: {
-                tickets_sold: parseInt(economy.tickets_sold),
-                total_revenue: economy.total_revenue || 0,
-                average_price: economy.average_price || 0,
-                percentage_of_total: total > 0 ? ((economy.total_revenue / total) * 100).toFixed(1) : 0
+                tickets_sold: parseInt(economy.tickets_sold || 0),
+                total_revenue: economyRevenue,
+                average_price: parseFloat(economy.average_price || 0),
+                percentage_of_total: total > 0 ? ((economyRevenue / total) * 100).toFixed(1) : '0.0'
             },
             total_revenue: total,
             total_revenue_formatted: this.formatCurrency(total)
@@ -276,6 +317,7 @@ class DashboardController {
             FROM sales s
             JOIN flights f ON s.flight_id = f.id
             JOIN passengers p ON s.passenger_id = p.id
+            WHERE s.payment_status = 'COMPLETED'
             ORDER BY s.sale_date DESC
             LIMIT 10
         `);
@@ -296,7 +338,7 @@ class DashboardController {
             style: 'currency',
             currency: 'USD',
             minimumFractionDigits: 2
-        }).format(amount);
+        }).format(Number(amount) || 0);
     }
 
     /**
@@ -306,29 +348,57 @@ class DashboardController {
         const { flightId } = req.params;
 
         try {
-            const totalSeats = await SeatState.countDocuments({ flight_id: parseInt(flightId) });
-            const soldSeats = await SeatState.countDocuments({ 
-                flight_id: parseInt(flightId), 
-                status: 'SOLD' 
-            });
-            const reservedSeats = await SeatState.countDocuments({ 
-                flight_id: parseInt(flightId), 
-                status: 'RESERVED' 
+            const flightResult = await pool.query(`
+                SELECT 
+                    f.id,
+                    f.flight_number,
+                    f.aircraft_id,
+                    a.first_class_seats,
+                    a.economy_seats
+                FROM flights f
+                LEFT JOIN aircrafts a ON f.aircraft_id = a.id
+                WHERE f.id = $1
+                LIMIT 1
+            `, [parseInt(flightId)]);
+
+            if (flightResult.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Vuelo no encontrado' });
+            }
+
+            const flight = flightResult.rows[0];
+            const totalSeats = parseInt(flight.first_class_seats || 0) + parseInt(flight.economy_seats || 0);
+
+            const soldSeats = await SeatState.countDocuments({
+                flight_id: parseInt(flightId),
+                status: 'SOLD'
             });
 
-            const occupancyRate = totalSeats > 0 ? ((soldSeats / totalSeats) * 100).toFixed(1) : 0;
+            const reservedSeats = await SeatState.countDocuments({
+                flight_id: parseInt(flightId),
+                status: 'RESERVED'
+            });
+
+            const refundedSeats = await SeatState.countDocuments({
+                flight_id: parseInt(flightId),
+                status: 'REFUNDED'
+            });
+
+            const availableSeats = Math.max(totalSeats - soldSeats - reservedSeats - refundedSeats, 0);
+            const occupancyRate = totalSeats > 0 ? ((soldSeats / totalSeats) * 100).toFixed(1) : '0.0';
 
             res.json({
                 success: true,
-                flight_id: flightId,
+                flight_id: parseInt(flightId),
+                flight_number: flight.flight_number,
                 total_seats: totalSeats,
                 sold: soldSeats,
                 reserved: reservedSeats,
-                available: totalSeats - soldSeats - reservedSeats,
+                refunded: refundedSeats,
+                available: availableSeats,
                 occupancy_rate: occupancyRate + '%'
             });
-
         } catch (error) {
+            console.error('[Dashboard] Error occupancy:', error);
             res.status(500).json({ success: false, error: error.message });
         }
     }
@@ -342,11 +412,12 @@ class DashboardController {
                 SELECT 
                     f.origin_code,
                     f.destination_code,
-                    COUNT(*) as total_flights,
-                    SUM(s.price_paid) as total_revenue,
+                    COUNT(DISTINCT f.id) as total_flights,
+                    COALESCE(SUM(s.price_paid), 0) as total_revenue,
                     COUNT(s.id) as tickets_sold
                 FROM flights f
                 JOIN sales s ON f.id = s.flight_id
+                WHERE s.payment_status = 'COMPLETED'
                 GROUP BY f.origin_code, f.destination_code
                 ORDER BY total_revenue DESC
                 LIMIT 10
@@ -354,10 +425,17 @@ class DashboardController {
 
             res.json({
                 success: true,
-                routes: result.rows
+                routes: result.rows.map(route => ({
+                    origin_code: route.origin_code,
+                    destination_code: route.destination_code,
+                    total_flights: parseInt(route.total_flights || 0),
+                    total_revenue: parseFloat(route.total_revenue || 0),
+                    total_revenue_formatted: this.formatCurrency(route.total_revenue || 0),
+                    tickets_sold: parseInt(route.tickets_sold || 0)
+                }))
             });
-
         } catch (error) {
+            console.error('[Dashboard] Error top routes:', error);
             res.status(500).json({ success: false, error: error.message });
         }
     }
