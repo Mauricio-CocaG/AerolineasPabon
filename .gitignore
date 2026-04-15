@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Environment & secrets
+backend/.env
+backend/google-wallet-key.json
+*.env
+.env.local
+.env.*.local
+
+# Generated PDF outputs
+backend/output/
+*.pdf
+
+# Claude / agent internals
+.claude/
+backend/.claude/
+.agents/
+backend/.agents/
+skills-lock.json
+backend/skills-lock.json
+
+# Personal files
+WhatsApp*
+aaaas.*
+
+# Build output
+frontend/dist/
+backend/dist/

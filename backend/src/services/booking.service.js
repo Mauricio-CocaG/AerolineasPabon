@@ -58,8 +58,24 @@ class BookingService {
     }
     
     async reserveSeat(flightId, seatNumber, passengerId, classType) {
-        try {
-            const availability = await this.checkAvailability(flightId, seatNumber);
+    try {
+        // --- NUEVA VALIDACIÓN 72 HORAS ---
+        const flightRes = await pool.query(
+            'SELECT departure_date, departure_time FROM flights WHERE id = $1', 
+            [flightId]
+        );
+        if (flightRes.rows.length > 0) {
+            const flight = flightRes.rows[0];
+            const departureDateTime = new Date(`${flight.departure_date.toISOString().split('T')[0]}T${flight.departure_time}`);
+            const diffInHours = (departureDateTime - new Date()) / (1000 * 60 * 60);
+
+            if (diffInHours < 72) {
+                return { success: false, error: 'Bloqueado: faltan menos de 72h para el vuelo.' };
+            }
+        }
+        // --- FIN VALIDACIÓN ---
+
+        const availability = await this.checkAvailability(flightId, seatNumber);
             if (!availability.available) {
                 return {
                     success: false,
@@ -128,8 +144,8 @@ class BookingService {
             }
             
             if (seat.status === 'REFUNDED') {
-                return { success: false, error: 'Asiento en proceso de devolucion. Espera 5 minutos.' };
-            }
+    return { success: false, error: 'Asiento en proceso de logística de catering. Espera 15 minutos.' };
+}
             
             const lockKey = 'lock:' + flightId + ':' + seatNumber;
             const lockAcquired = await redisClient.setNX(lockKey, String(this.nodeId));
@@ -206,7 +222,7 @@ class BookingService {
             const currentClock = this.vectorClock.getClock();
             
             const expiresAt = new Date();
-            expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+            expiresAt.setMinutes(expiresAt.getMinutes() + 15);
             
             const updatedSeat = await SeatState.findOneAndUpdate(
                 { flight_id: flightId, seat_number: seatNumber },
@@ -220,12 +236,12 @@ class BookingService {
                 { new: true }
             );
             
-            await redisClient.setEx('catering:' + flightId + ':' + seatNumber, 300, JSON.stringify({ flightId: flightId, seatNumber: seatNumber, expiresAt: expiresAt.toISOString() }));
+            await redisClient.setEx('catering:' + flightId + ':' + seatNumber, 900, JSON.stringify({ flightId: flightId, seatNumber: seatNumber, expiresAt: expiresAt.toISOString() }));
             
             var self = this;
             setTimeout(async function() {
                 await self.releaseSeatAfterCatering(flightId, seatNumber);
-            }, 300000);
+            }, 900000);
             
             if (this.syncService) {
                 await this.syncService.broadcast('SEAT_REFUNDED', {
