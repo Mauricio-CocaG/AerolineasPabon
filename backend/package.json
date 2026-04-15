@@ -1,0 +1,38 @@
+{
+  "name": "rafael-pabon-backend",
+  "version": "1.0.0",
+  "description": "Sistema de reservas aéreas distribuido con relojes vectoriales",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "node1": "cross-env NODE_ID=1 NODE_NAME=BOGOTA PORT=3001 nodemon src/app.js",
+    "node2": "cross-env NODE_ID=2 NODE_NAME=MADRID PORT=3002 nodemon src/app.js",
+    "node3": "cross-env NODE_ID=3 NODE_NAME=TOKIO PORT=3003 nodemon src/app.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "axios": "^1.3.4",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.0.3",
+    "morgan": "^1.10.0",
+    "pdfkit": "^0.13.0",
+    "pg": "^8.10.0",
+    "qrcode": "^1.5.1",
+    "redis": "^4.6.5",
+    "uuid": "^9.0.0",
+    "winston": "^3.8.2"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "jest": "^29.5.0",
+    "nodemon": "^2.0.22"
+  }
+}
