@@ -11,11 +11,9 @@ const BookingService = require('./services/booking.service');
 const DijkstraService = require('./services/dijkstra.service');
 const DashboardController = require('./controllers/dashboard.controller');
 const PDFGeneratorService = require('./services/pdf-generator.service');
-const QRCode              = require('qrcode');
-const os                  = require('os');
-const jwt                 = require('jsonwebtoken');
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const QRCode = require('qrcode');
+const os = require('os');
+const jwt = require('jsonwebtoken');
 
 function getPublicBaseUrl(req) {
     if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
@@ -26,7 +24,7 @@ function getPublicBaseUrl(req) {
         for (const net of ifaces) {
             if (net.family !== 'IPv4' || net.internal) continue;
             if (net.address.startsWith('192.168.')) { candidates.unshift(net.address); break; }
-            if (net.address.startsWith('10.'))       candidates.push(net.address);
+            if (net.address.startsWith('10.')) candidates.push(net.address);
         }
     }
     if (candidates.length > 0) return `http://${candidates[0]}:${PORT}`;
@@ -42,29 +40,32 @@ function buildGoogleWalletUrl(data) {
     if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
         try {
             const kp = path.resolve(process.cwd(), process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE);
-            const k  = JSON.parse(fs.readFileSync(kp, 'utf8'));
-            svcEmail   = k.client_email;
+            const k = JSON.parse(fs.readFileSync(kp, 'utf8'));
+            svcEmail = k.client_email;
             privateKey = k.private_key;
         } catch { }
     }
-    if (!svcEmail)   svcEmail   = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+
+    if (!svcEmail) svcEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     if (!privateKey) privateKey = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 
     if (!issuerId || !svcEmail || !privateKey || !privateKey.includes('BEGIN')) return null;
 
     try {
-        const fnMatch     = /^([A-Z]{2,3})\s*(\d+)$/i.exec(String(data.flightNumber || '').trim());
+        const fnMatch = /^([A-Z]{2,3})\s*(\d+)$/i.exec(String(data.flightNumber || '').trim());
         const carrierCode = fnMatch ? fnMatch[1].toUpperCase() : 'AP';
-        const flightNum   = fnMatch ? fnMatch[2] : String(data.flightNumber || '');
+        const flightNum = fnMatch ? fnMatch[2] : String(data.flightNumber || '');
 
         let depDate = '';
         try {
             const raw = data.departureDate;
             const iso = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
-            depDate   = iso.substring(0, 10);
+            depDate = iso.substring(0, 10);
         } catch { }
-        if (!depDate || !/^\d{4}-\d{2}-\d{2}$/.test(depDate))
+
+        if (!depDate || !/^\d{4}-\d{2}-\d{2}$/.test(depDate)) {
             depDate = new Date().toISOString().substring(0, 10);
+        }
 
         let depTime = '00:00';
         try {
@@ -75,18 +76,18 @@ function buildGoogleWalletUrl(data) {
         const localDT = `${depDate}T${depTime}:00`;
         console.log(`[GoogleWallet] localScheduledDepartureDateTime = ${localDT}`);
 
-        const safeDate    = (depDate || 'nodate').replace(/-/g, '');
-        const classId     = `${issuerId}.${carrierCode}${flightNum}_${safeDate}`;
-        const objectId    = `${issuerId}.${String(data.ticketNumber).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const safeDate = (depDate || 'nodate').replace(/-/g, '');
+        const classId = `${issuerId}.${carrierCode}${flightNum}_${safeDate}`;
+        const objectId = `${issuerId}.${String(data.ticketNumber).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
-        const isFirst    = data.classType === 'FIRST';
+        const isFirst = data.classType === 'FIRST';
         const classLabel = isFirst ? 'First Class' : 'Economy';
-        const hexBg      = isFirst ? '#7C2D12' : '#1E3A8A';
+        const hexBg = isFirst ? '#7C2D12' : '#1E3A8A';
 
         const passPayload = {
             flightClasses: [{
-                id:           classId,
-                issuerName:   'Aerolineas Pabon',
+                id: classId,
+                issuerName: 'Aerolineas Pabon',
                 reviewStatus: 'APPROVED',
                 hexBackgroundColor: hexBg,
                 flightHeader: {
@@ -94,12 +95,12 @@ function buildGoogleWalletUrl(data) {
                         carrierIataCode: carrierCode,
                         airlineName: { defaultValue: { language: 'en-US', value: 'Aerolineas Pabon' } },
                     },
-                    flightNumber:                flightNum,
+                    flightNumber: flightNum,
                     flightNumberDisplayOverride: String(data.flightNumber || ''),
                 },
                 origin: {
-                    airportIataCode: String(data.origin      || ''),
-                    gate:            String(data.gate        || ''),
+                    airportIataCode: String(data.origin || ''),
+                    gate: String(data.gate || ''),
                 },
                 destination: {
                     airportIataCode: String(data.destination || ''),
@@ -107,40 +108,47 @@ function buildGoogleWalletUrl(data) {
                 localScheduledDepartureDateTime: localDT,
             }],
             flightObjects: [{
-                id:                 objectId,
-                classId:            classId,
-                state:              'ACTIVE',
+                id: objectId,
+                classId: classId,
+                state: 'ACTIVE',
                 hexBackgroundColor: hexBg,
-                passengerName:      String(data.passengerName || '').toUpperCase(),
-                reservationInfo:    { confirmationCode: String(data.ticketNumber || '') },
+                passengerName: String(data.passengerName || '').toUpperCase(),
+                reservationInfo: { confirmationCode: String(data.ticketNumber || '') },
                 boardingAndSeatingInfo: {
                     seatNumber: String(data.seatNumber || ''),
-                    seatClass:  classLabel,
+                    seatClass: classLabel,
                 },
                 barcode: {
-                    type:          'QR_CODE',
-                    value:         String(data.ticketNumber || ''),
+                    type: 'QR_CODE',
+                    value: String(data.ticketNumber || ''),
                     alternateText: String(data.ticketNumber || ''),
                 },
                 textModulesData: [
-                    { id: 'gate',  header: 'GATE',  body: String(data.gate  || 'TBD') },
+                    { id: 'gate', header: 'GATE', body: String(data.gate || 'TBD') },
                     { id: 'class', header: 'CLASS', body: classLabel },
                 ],
             }],
         };
 
         const token = jwt.sign(
-            { iss: svcEmail, aud: 'google', typ: 'savetowallet', payload: passPayload,
-              iat: Math.floor(Date.now() / 1000) },
+            {
+                iss: svcEmail,
+                aud: 'google',
+                typ: 'savetowallet',
+                payload: passPayload,
+                iat: Math.floor(Date.now() / 1000)
+            },
             privateKey,
             { algorithm: 'RS256' }
         );
+
         return `https://pay.google.com/gp/v/save/${token}`;
     } catch (err) {
         console.error('[GoogleWallet] JWT error:', err.message);
         return null;
     }
 }
+
 const { connectMongoDB } = require('./config/database/mongodb');
 const { connectRedis } = require('./config/database/redis');
 const pool = require('./config/database/postgres');
@@ -150,20 +158,17 @@ const PORT = process.env.PORT || 3001;
 const NODE_ID = parseInt(process.env.NODE_ID) || 1;
 const NODE_NAME = process.env.NODE_NAME || 'BOGOTA';
 
-// Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(morgan('combined'));
 
-// Inicializar servicios
 let syncService = null;
 let bookingService = null;
 let dashboardController = null;
 const dijkstraService = new DijkstraService();
 const pdfGenerator = new PDFGeneratorService();
 
-// Cargar rutas de ejemplo para Dijkstra
 dijkstraService.addRoute('ATL', 'DFW', 250, 2.5);
 dijkstraService.addRoute('ATL', 'LON', 800, 8.5);
 dijkstraService.addRoute('ATL', 'DXB', 1200, 14.0);
@@ -177,7 +182,6 @@ dijkstraService.addRoute('DXB', 'TYO', 900, 10.5);
 dijkstraService.addRoute('PEK', 'TYO', 400, 4.5);
 dijkstraService.addRoute('LON', 'TYO', 1100, 12.0);
 
-// Middleware para inyectar servicios en las rutas
 app.use((req, res, next) => {
     req.nodeId = NODE_ID;
     req.nodeName = NODE_NAME;
@@ -214,30 +218,30 @@ app.get('/api/v1/vector-clock', (req, res) => {
 
 app.post('/api/v1/passenger', async (req, res) => {
     const { passport_number, first_name, last_name, email, phone } = req.body;
-    
+
     console.log('[Passenger] Solicitud recibida:', { passport_number, first_name, last_name });
-    
+
     if (!passport_number || !first_name || !last_name) {
         return res.status(400).json({ error: 'Faltan campos requeridos: passport_number, first_name, last_name' });
     }
-    
+
     try {
         const existing = await pool.query(
             'SELECT * FROM passengers WHERE passport_number = $1',
             [passport_number]
         );
-        
+
         if (existing.rows.length > 0) {
             console.log('[Passenger] Pasajero existente:', existing.rows[0].id);
             return res.json(existing.rows[0]);
         }
-        
+
         const result = await pool.query(
             `INSERT INTO passengers (passport_number, first_name, last_name, email, phone) 
              VALUES ($1, $2, $3, $4, $5) RETURNING *`,
             [passport_number, first_name, last_name, email || null, phone || null]
         );
-        
+
         console.log('[Passenger] Pasajero creado:', result.rows[0].id);
         res.json(result.rows[0]);
     } catch (error) {
@@ -246,24 +250,23 @@ app.post('/api/v1/passenger', async (req, res) => {
     }
 });
 
-// Buscar pasajero por pasaporte (GET)
 app.get('/api/v1/passenger/search', async (req, res) => {
     const { passport } = req.query;
-    
+
     if (!passport) {
         return res.status(400).json({ error: 'passport es requerido' });
     }
-    
+
     try {
         const result = await pool.query(
             'SELECT * FROM passengers WHERE passport_number = $1',
             [passport]
         );
-        
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Pasajero no encontrado' });
         }
-        
+
         res.json(result.rows[0]);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -285,11 +288,11 @@ app.get('/api/v1/passengers', async (req, res) => {
 
 app.get('/api/v1/seat/availability', async (req, res) => {
     const { flightId, seatNumber } = req.query;
-    
+
     if (!flightId || !seatNumber) {
         return res.status(400).json({ error: 'flightId y seatNumber son requeridos' });
     }
-    
+
     const availability = await bookingService.checkAvailability(parseInt(flightId), seatNumber);
     res.json(availability);
 });
@@ -376,38 +379,38 @@ app.get('/api/v1/airports', (req, res) => {
 
 app.get('/api/v1/routes/cheapest', (req, res) => {
     const { origin, destination } = req.query;
-    
+
     if (!origin || !destination) {
         return res.status(400).json({ error: 'origin y destination son requeridos' });
     }
-    
+
     const result = dijkstraService.findCheapestRoute(origin.toUpperCase(), destination.toUpperCase());
     res.json(result);
 });
 
 app.get('/api/v1/routes/fastest', (req, res) => {
     const { origin, destination } = req.query;
-    
+
     if (!origin || !destination) {
         return res.status(400).json({ error: 'origin y destination son requeridos' });
     }
-    
+
     const result = dijkstraService.findFastestRoute(origin.toUpperCase(), destination.toUpperCase());
     res.json(result);
 });
 
 app.get('/api/v1/routes/direct', (req, res) => {
     const { origin, destination } = req.query;
-    
+
     if (!origin || !destination) {
         return res.status(400).json({ error: 'origin y destination son requeridos' });
     }
-    
+
     const exists = dijkstraService.hasDirectRoute(origin.toUpperCase(), destination.toUpperCase());
     const route = dijkstraService.getDirectRoute(origin.toUpperCase(), destination.toUpperCase());
-    
-    res.json({ 
-        direct: exists, 
+
+    res.json({
+        direct: exists,
         route: route,
         origin: origin.toUpperCase(),
         destination: destination.toUpperCase()
@@ -416,20 +419,23 @@ app.get('/api/v1/routes/direct', (req, res) => {
 
 app.post('/api/v1/routes/multi-destination', (req, res) => {
     const { start, destinations } = req.body;
-    
+
     if (!start || !destinations || !Array.isArray(destinations) || destinations.length === 0) {
         return res.status(400).json({ error: 'start y destinations (array) son requeridos' });
     }
-    
-    const result = dijkstraService.findAllPossibleRoutes(start.toUpperCase(), destinations.map(d => d.toUpperCase()));
-    
+
+    const result = dijkstraService.findAllPossibleRoutes(
+        start.toUpperCase(),
+        destinations.map(d => d.toUpperCase())
+    );
+
     if (result.length === 0) {
         return res.json({ found: false, error: 'No se encontraron rutas validas' });
     }
-    
+
     const sortedByCost = [...result].sort((a, b) => a.totalCost - b.totalCost);
     const sortedByTime = [...result].sort((a, b) => a.totalTime - b.totalTime);
-    
+
     res.json({
         found: true,
         cheapest: sortedByCost[0],
@@ -439,86 +445,104 @@ app.post('/api/v1/routes/multi-destination', (req, res) => {
 });
 
 // ============================================
-// API ENDPOINTS - VUELOS (CON RANGO DE FECHAS)
+// API ENDPOINTS - VUELOS
 // ============================================
 
-app.get('/api/v1/flights', async (req, res) => {
-    const { origin, destination, startDate, endDate, page = 1, limit = 20 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    
-    // Validar que haya al menos un filtro
-    if (!origin && !destination && !startDate && !endDate) {
-        return res.status(400).json({ error: 'Se requiere al menos un filtro (origen, destino o fecha)' });
-    }
-    
-    let query = 'SELECT * FROM flights WHERE 1=1';
-    const params = [];
-    
-    if (origin) {
-        query += ` AND origin_code = $${params.length + 1}`;
-        params.push(origin.toUpperCase());
-    }
-    if (destination) {
-        query += ` AND destination_code = $${params.length + 1}`;
-        params.push(destination.toUpperCase());
-    }
-    if (startDate) {
-        query += ` AND departure_date >= $${params.length + 1}`;
-        params.push(startDate);
-    }
-    if (endDate) {
-        query += ` AND departure_date <= $${params.length + 1}`;
-        params.push(endDate);
-    }
-    
-    // Count total for pagination
-    const countQuery = query.replace('SELECT *', 'SELECT COUNT(*)');
-    const countResult = await pool.query(countQuery, params);
-    const total = parseInt(countResult.rows[0].count);
-    
-    // Add pagination
-    query += ' ORDER BY departure_date ASC, departure_time ASC';
-    query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), offset);
-    
+// Orígenes reales del dataset
+app.get('/api/v1/flights/valid-origins', async (req, res) => {
     try {
-        const result = await pool.query(query, params);
-        
+        const result = await pool.query(`
+            SELECT DISTINCT origin_code
+            FROM flights
+            WHERE origin_code IS NOT NULL
+            ORDER BY origin_code ASC
+        `);
+
         res.json({
             success: true,
-            data: result.rows,
-            pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
-                total: total,
-                pages: Math.ceil(total / limit),
-                hasNext: parseInt(page) < Math.ceil(total / limit),
-                hasPrev: parseInt(page) > 1
-            }
+            origins: result.rows.map(row => row.origin_code)
         });
     } catch (error) {
-        console.error('[Flights] Error:', error);
+        console.error('[Flights Valid Origins] Error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
+// Destinos válidos según origen real
+app.get('/api/v1/flights/destinations', async (req, res) => {
+    const { origin } = req.query;
+
+    if (!origin) {
+        return res.status(400).json({ error: 'origin es requerido' });
+    }
+
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT destination_code
+            FROM flights
+            WHERE origin_code = $1
+              AND destination_code IS NOT NULL
+            ORDER BY destination_code ASC
+        `, [origin.toUpperCase()]);
+
+        res.json({
+            success: true,
+            origin: origin.toUpperCase(),
+            destinations: result.rows.map(row => row.destination_code)
+        });
+    } catch (error) {
+        console.error('[Flights Destinations] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Orígenes válidos según destino
+app.get('/api/v1/flights/origins', async (req, res) => {
+    const { destination } = req.query;
+
+    if (!destination) {
+        return res.status(400).json({ error: 'destination es requerido' });
+    }
+
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT origin_code
+            FROM flights
+            WHERE destination_code = $1
+              AND origin_code IS NOT NULL
+            ORDER BY origin_code ASC
+        `, [destination.toUpperCase()]);
+
+        res.json({
+            success: true,
+            destination: destination.toUpperCase(),
+            origins: result.rows.map(row => row.origin_code)
+        });
+    } catch (error) {
+        console.error('[Flights Origins] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Fechas disponibles por origen y destino
 app.get('/api/v1/flights/available-dates', async (req, res) => {
     const { origin, destination } = req.query;
-    
+
     let query = 'SELECT DISTINCT departure_date FROM flights WHERE 1=1';
     const params = [];
-    
+
     if (origin) {
         query += ` AND origin_code = $${params.length + 1}`;
         params.push(origin.toUpperCase());
     }
+
     if (destination) {
         query += ` AND destination_code = $${params.length + 1}`;
         params.push(destination.toUpperCase());
     }
-    
+
     query += ' ORDER BY departure_date ASC';
-    
+
     try {
         const result = await pool.query(query, params);
         res.json({
@@ -528,17 +552,80 @@ app.get('/api/v1/flights/available-dates', async (req, res) => {
             dates: result.rows.map(row => row.departure_date)
         });
     } catch (error) {
+        console.error('[Flights Available Dates] Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/v1/flights', async (req, res) => {
+    const { origin, destination, startDate, endDate, page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    if (!origin && !destination && !startDate && !endDate) {
+        return res.status(400).json({ error: 'Se requiere al menos un filtro (origen, destino o fecha)' });
+    }
+
+    let query = 'SELECT * FROM flights WHERE 1=1';
+    const params = [];
+
+    if (origin) {
+        query += ` AND origin_code = $${params.length + 1}`;
+        params.push(origin.toUpperCase());
+    }
+
+    if (destination) {
+        query += ` AND destination_code = $${params.length + 1}`;
+        params.push(destination.toUpperCase());
+    }
+
+    if (startDate) {
+        query += ` AND departure_date >= $${params.length + 1}`;
+        params.push(startDate);
+    }
+
+    if (endDate) {
+        query += ` AND departure_date <= $${params.length + 1}`;
+        params.push(endDate);
+    }
+
+    const countQuery = query.replace('SELECT *', 'SELECT COUNT(*)');
+    const countResult = await pool.query(countQuery, params);
+    const total = parseInt(countResult.rows[0].count);
+
+    query += ' ORDER BY departure_date ASC, departure_time ASC';
+    query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), offset);
+
+    try {
+        const result = await pool.query(query, params);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: total,
+                pages: Math.ceil(total / parseInt(limit)),
+                hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+                hasPrev: parseInt(page) > 1
+            }
+        });
+    } catch (error) {
+        console.error('[Flights] Error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 app.get('/api/v1/flights/:flightId/seats', async (req, res) => {
     const { flightId } = req.params;
+
     try {
         const flightResult = await pool.query(
             'SELECT f.*, a.first_class_seats, a.economy_seats FROM flights f LEFT JOIN aircrafts a ON f.aircraft_id = a.id WHERE f.id = $1',
             [flightId]
         );
+
         if (flightResult.rows.length === 0) {
             return res.status(404).json({ error: 'Vuelo no encontrado' });
         }
@@ -550,6 +637,7 @@ app.get('/api/v1/flights/:flightId/seats', async (req, res) => {
 
         const SeatState = require('./models/mongodb/SeatState.model');
         const seatStates = await SeatState.find({ flight_id: parseInt(flightId) });
+
         const stateMap = {};
         seatStates.forEach(s => { stateMap[s.seat_number] = s.status; });
 
@@ -627,19 +715,19 @@ app.get('/api/v1/boarding-pass/pdf', async (req, res) => {
         const data = sale.rows[0];
 
         const result = await pdfGenerator.generateBoardingPass({
-            ticketNumber:     data.ticket_number,
-            passengerName:    data.first_name + ' ' + data.last_name,
-            passportNumber:   data.passport_number,
-            flightNumber:     data.flight_number,
-            origin:           data.origin_code,
-            destination:      data.destination_code,
-            departureDate:    data.departure_date,
-            departureTime:    data.departure_time,
-            seatNumber:       data.seat_number,
-            classType:        data.class_type,
-            gate:             data.gate,
-            price:            data.price_paid,
-            durationHours:    data.flight_duration_hours,
+            ticketNumber: data.ticket_number,
+            passengerName: data.first_name + ' ' + data.last_name,
+            passportNumber: data.passport_number,
+            flightNumber: data.flight_number,
+            origin: data.origin_code,
+            destination: data.destination_code,
+            departureDate: data.departure_date,
+            departureTime: data.departure_time,
+            seatNumber: data.seat_number,
+            classType: data.class_type,
+            gate: data.gate,
+            price: data.price_paid,
+            durationHours: data.flight_duration_hours,
         });
 
         if (result.success) {
@@ -676,6 +764,7 @@ app.get('/api/v1/boarding-pass/wallet', async (req, res) => {
              WHERE s.ticket_number = $1`,
             [ticket]
         );
+
         if (sale.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
 
         const d = sale.rows[0];
@@ -690,37 +779,40 @@ app.get('/api/v1/boarding-pass/wallet', async (req, res) => {
             width: 400,
             color: { dark: '#142258', light: '#ffffff' },
         });
+
         const qrCode = `data:image/png;base64,${qrBuffer.toString('base64')}`;
 
         let fmtDate = '';
         try {
-            const raw  = d.departure_date;
-            const iso  = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
-            const dt   = new Date(iso.substring(0, 10) + 'T12:00:00Z');
-            fmtDate    = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-        } catch { fmtDate = String(d.departure_date || ''); }
+            const raw = d.departure_date;
+            const iso = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
+            const dt = new Date(iso.substring(0, 10) + 'T12:00:00Z');
+            fmtDate = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+        } catch {
+            fmtDate = String(d.departure_date || '');
+        }
 
         const googleWalletUrl = buildGoogleWalletUrl({
-            ticketNumber:  d.ticket_number,
+            ticketNumber: d.ticket_number,
             passengerName,
-            flightNumber:  d.flight_number,
-            origin:        d.origin_code,
-            destination:   d.destination_code,
+            flightNumber: d.flight_number,
+            origin: d.origin_code,
+            destination: d.destination_code,
             departureDate: d.departure_date,
             departureTime: d.departure_time,
             fmtDate,
-            seatNumber:    d.seat_number,
-            classType:     d.class_type,
-            gate:          d.gate,
+            seatNumber: d.seat_number,
+            classType: d.class_type,
+            gate: d.gate,
         });
 
         res.json({
-            success:          true,
+            success: true,
             qrCode,
             viewUrl,
             googleWalletUrl,
-            hasGoogleWallet:  !!googleWalletUrl,
-            instructions:     'Scan QR to open your boarding pass, or tap the Google Wallet button on Android',
+            hasGoogleWallet: !!googleWalletUrl,
+            instructions: 'Scan QR to open your boarding pass, or tap the Google Wallet button on Android',
         });
     } catch (error) {
         console.error('[Wallet] Error:', error);
@@ -752,21 +844,23 @@ app.get('/api/v1/boarding-pass/view', async (req, res) => {
         const d = result.rows[0];
 
         const CITIES = {
-            ATL:'Atlanta, USA',DFW:'Dallas, USA',LON:'London, UK',LHR:'London, UK',
-            PEK:'Beijing, China',DXB:'Dubai, UAE',TYO:'Tokyo, Japan',NRT:'Tokyo, Japan',
-            PAR:'Paris, France',CDG:'Paris, France',LAX:'Los Angeles, USA',JFK:'New York, USA',
-            FRA:'Frankfurt, Germany',IST:'Istanbul, Turkey',SIN:'Singapore',MAD:'Madrid, Spain',
-            AMS:'Amsterdam, NL',CAN:'Guangzhou, China',SAO:'Sao Paulo, Brazil',
-            SYD:'Sydney, Australia',BOG:'Bogota, Colombia',MIA:'Miami, USA',ORD:'Chicago, USA',
+            ATL: 'Atlanta, USA', DFW: 'Dallas, USA', LON: 'London, UK', LHR: 'London, UK',
+            PEK: 'Beijing, China', DXB: 'Dubai, UAE', TYO: 'Tokyo, Japan', NRT: 'Tokyo, Japan',
+            PAR: 'Paris, France', CDG: 'Paris, France', LAX: 'Los Angeles, USA', JFK: 'New York, USA',
+            FRA: 'Frankfurt, Germany', IST: 'Istanbul, Turkey', SIN: 'Singapore', MAD: 'Madrid, Spain',
+            AMS: 'Amsterdam, NL', CAN: 'Guangzhou, China', SAO: 'Sao Paulo, Brazil',
+            SYD: 'Sydney, Australia', BOG: 'Bogota, Colombia', MIA: 'Miami, USA', ORD: 'Chicago, USA',
         };
 
         let fmtDate = '';
         try {
-            const raw  = d.departure_date;
-            const iso  = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
-            const dt   = new Date(iso.substring(0, 10) + 'T12:00:00Z');
-            fmtDate    = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-        } catch { fmtDate = String(d.departure_date || ''); }
+            const raw = d.departure_date;
+            const iso = (raw instanceof Date) ? raw.toISOString() : String(raw || '');
+            const dt = new Date(iso.substring(0, 10) + 'T12:00:00Z');
+            fmtDate = dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+        } catch {
+            fmtDate = String(d.departure_date || '');
+        }
 
         const fmtTime = (d.departure_time || '').substring(0, 5);
 
@@ -774,58 +868,63 @@ app.get('/api/v1/boarding-pass/view', async (req, res) => {
         if (d.flight_duration_hours) {
             const h = Math.floor(Number(d.flight_duration_hours));
             const m = Math.round((Number(d.flight_duration_hours) - h) * 60);
-            duration = m > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${h}h`;
+            duration = m > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${h}h`;
         }
 
         const passengerName = `${d.first_name} ${d.last_name}`;
         const price = '$' + parseFloat(d.price_paid || 0).toLocaleString();
 
         const qrBuffer = await QRCode.toBuffer(JSON.stringify({
-            ticket:    d.ticket_number,
-            flight:    d.flight_number,
+            ticket: d.ticket_number,
+            flight: d.flight_number,
             passenger: passengerName,
-            seat:      d.seat_number,
-            from:      d.origin_code,
-            to:        d.destination_code,
-            date:      fmtDate,
-            gate:      d.gate,
-            class:     d.class_type,
-        }), { errorCorrectionLevel: 'M', width: 240, margin: 2,
-              color: { dark: '#0D1B4B', light: '#ffffff' } });
+            seat: d.seat_number,
+            from: d.origin_code,
+            to: d.destination_code,
+            date: fmtDate,
+            gate: d.gate,
+            class: d.class_type,
+        }), {
+            errorCorrectionLevel: 'M',
+            width: 240,
+            margin: 2,
+            color: { dark: '#0D1B4B', light: '#ffffff' }
+        });
+
         const qrDataUrl = `data:image/png;base64,${qrBuffer.toString('base64')}`;
 
         const googleWalletUrl = buildGoogleWalletUrl({
-            ticketNumber:  d.ticket_number,
+            ticketNumber: d.ticket_number,
             passengerName,
-            flightNumber:  d.flight_number,
-            origin:        d.origin_code,
-            destination:   d.destination_code,
+            flightNumber: d.flight_number,
+            origin: d.origin_code,
+            destination: d.destination_code,
             departureDate: d.departure_date,
             departureTime: d.departure_time,
             fmtDate,
-            seatNumber:    d.seat_number,
-            classType:     d.class_type,
-            gate:          d.gate,
+            seatNumber: d.seat_number,
+            classType: d.class_type,
+            gate: d.gate,
         });
 
         const html = pdfGenerator.generateViewHtml({
-            ticketNumber:     d.ticket_number,
+            ticketNumber: d.ticket_number,
             passengerName,
-            passportNumber:   d.passport_number,
-            flightNumber:     d.flight_number,
-            origin:           d.origin_code,
-            destination:      d.destination_code,
-            originCity:       CITIES[d.origin_code]      || '',
-            destCity:         CITIES[d.destination_code] || '',
+            passportNumber: d.passport_number,
+            flightNumber: d.flight_number,
+            origin: d.origin_code,
+            destination: d.destination_code,
+            originCity: CITIES[d.origin_code] || '',
+            destCity: CITIES[d.destination_code] || '',
             fmtDate,
             fmtTime,
             duration,
-            seatNumber:       d.seat_number,
-            classType:        d.class_type,
-            gate:             d.gate,
+            seatNumber: d.seat_number,
+            classType: d.class_type,
+            gate: d.gate,
             price,
             bookingReference: d.booking_reference,
-            googleWalletUrl:  googleWalletUrl || '',
+            googleWalletUrl: googleWalletUrl || '',
         }, qrDataUrl);
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -846,22 +945,22 @@ const startServer = async () => {
     try {
         await connectMongoDB();
         await connectRedis();
-        
+
         await pool.query('SELECT NOW()');
         console.log('[DB] PostgreSQL connected');
-        
+
         syncService = new SyncService(NODE_ID, NODE_NAME);
         const syncConnected = await syncService.connect();
-        
+
         if (syncConnected) {
             console.log('[Sync] RabbitMQ connected - Modo distribuido ACTIVADO');
         } else {
             console.log('[Sync] RabbitMQ no disponible - Modo STANDALONE');
         }
-        
+
         bookingService = new BookingService(NODE_ID, NODE_NAME, syncService);
         dashboardController = new DashboardController(syncService, NODE_ID, NODE_NAME);
-        
+
         app.listen(PORT, () => {
             console.log('');
             console.log('========================================');
@@ -895,6 +994,9 @@ const startServer = async () => {
             console.log('  POST /api/v1/routes/multi-destination');
             console.log('');
             console.log('--- VUELOS ---');
+            console.log('  GET  /api/v1/flights/valid-origins');
+            console.log('  GET  /api/v1/flights/destinations?origin=');
+            console.log('  GET  /api/v1/flights/origins?destination=');
             console.log('  GET  /api/v1/flights?origin=&destination=&startDate=&endDate=&page=&limit=');
             console.log('  GET  /api/v1/flights/available-dates?origin=&destination=');
             console.log('  GET  /api/v1/flights/:flightId/seats');
@@ -910,29 +1012,35 @@ const startServer = async () => {
             console.log('');
 
             const gwIssuerId = process.env.GOOGLE_WALLET_ISSUER_ID;
-            const gwKeyFile  = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE;
+            const gwKeyFile = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE;
+
             if (!gwIssuerId && !gwKeyFile) {
                 console.log('[GoogleWallet] ⚠  No configurado — el boton no aparecera');
             } else {
                 let gwEmail = null, gwKeyOk = false;
                 try {
                     const kp = path.resolve(__dirname, '..', gwKeyFile || '');
-                    const k  = JSON.parse(fs.readFileSync(kp, 'utf8'));
-                    gwEmail  = k.client_email;
-                    gwKeyOk  = !!(k.private_key && k.private_key.includes('BEGIN'));
+                    const k = JSON.parse(fs.readFileSync(kp, 'utf8'));
+                    gwEmail = k.client_email;
+                    gwKeyOk = !!(k.private_key && k.private_key.includes('BEGIN'));
                 } catch (e) { }
+
                 if (!gwEmail) gwEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(no configurado)';
+
                 console.log('[GoogleWallet] Issuer ID : ' + (gwIssuerId || '(FALTANTE)'));
                 console.log('[GoogleWallet] Account   : ' + gwEmail);
                 console.log('[GoogleWallet] Key file  : ' + (gwKeyOk ? 'OK' : 'ERROR - no se pudo leer'));
-                if (gwIssuerId && gwEmail && gwKeyOk)
+
+                if (gwIssuerId && gwEmail && gwKeyOk) {
                     console.log('[GoogleWallet] Estado    : LISTO');
-                else
+                } else {
                     console.log('[GoogleWallet] Estado    : INCOMPLETO - revisa las vars de entorno');
+                }
             }
+
             console.log('');
         });
-        
+
     } catch (error) {
         console.error('[Fatal] Error starting server:', error);
         process.exit(1);

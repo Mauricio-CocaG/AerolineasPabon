@@ -12,6 +12,7 @@ const seatStateSchema = new mongoose.Schema({
         node_2: { type: Number, default: 0 },
         node_3: { type: Number, default: 0 }
     },
+    reservation_expires_at: { type: Date, default: null },
     last_passenger_id: { type: Number, default: null },
     last_updated: { type: Date, default: Date.now },
     last_updated_by_node: { type: Number, required: true }

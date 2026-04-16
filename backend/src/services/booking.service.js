@@ -10,8 +10,15 @@ class BookingService {
         this.syncService = syncService;
         this.vectorClock = new VectorClock(this.nodeId, 3);
 
+        // Devolución
         this.refundTimerSeconds = Number(process.env.REFUND_TIMER_SECONDS || 900);
         this.refundTimerMs = this.refundTimerSeconds * 1000;
+
+        // Reserva temporal: 5 minutos
+        this.reserveTimerSeconds = 300;
+        this.reserveTimerMs = this.reserveTimerSeconds * 1000;
+
+        // Lock corto distribuido
         this.processingLockSeconds = Number(process.env.SEAT_LOCK_SECONDS || 30);
 
         this.registerSyncHandlers();
@@ -37,6 +44,10 @@ class BookingService {
         this.syncService.on('SEAT_AVAILABLE', async function (data, senderNodeId) {
             await self.handleRemoteAvailable(data, senderNodeId);
         });
+
+        this.syncService.on('SEAT_RESERVATION_EXPIRED', async function (data, senderNodeId) {
+            await self.handleRemoteReservationExpired(data, senderNodeId);
+        });
     }
 
     getLockKey(flightId, seatNumber) {
@@ -45,6 +56,10 @@ class BookingService {
 
     getCateringKey(flightId, seatNumber) {
         return 'catering:' + flightId + ':' + seatNumber;
+    }
+
+    getReservationKey(flightId, seatNumber) {
+        return 'reservation:' + flightId + ':' + seatNumber;
     }
 
     async acquireSeatLock(flightId, seatNumber) {
@@ -129,6 +144,7 @@ class BookingService {
         return flightDate;
     }
 
+    /*
     async validateSeventyTwoHours(flightId) {
         try {
             const flight = await this.getFlightData(flightId);
@@ -162,6 +178,12 @@ class BookingService {
             console.error('[Booking] Error validando 72 horas:', error);
             return { valid: false, error: 'Error al validar la regla de 72 horas' };
         }
+    }
+    */
+
+    // Deshabilitada temporalmente para pruebas
+    async validateSeventyTwoHours(flightId) {
+        return { valid: true };
     }
 
     mergeRemoteVectorClock(remoteClock) {
@@ -223,6 +245,19 @@ class BookingService {
                 return { available: true, status: 'AVAILABLE' };
             }
 
+            if (seat.status === 'RESERVED' && seat.reservation_expires_at) {
+                if (new Date() > new Date(seat.reservation_expires_at)) {
+                    await this.releaseSeatAfterReservationTimeout(flightId, seatNumber);
+                    return { available: true, status: 'AVAILABLE' };
+                }
+
+                return {
+                    available: false,
+                    status: 'RESERVED',
+                    expiresAt: seat.reservation_expires_at
+                };
+            }
+
             if (seat.status === 'REFUNDED' && seat.refund_timer_expires_at) {
                 if (new Date() > new Date(seat.refund_timer_expires_at)) {
                     await this.releaseSeatAfterCatering(flightId, seatNumber);
@@ -251,10 +286,11 @@ class BookingService {
         let lockInfo = null;
 
         try {
-            const validation = await this.validateSeventyTwoHours(flightId);
-            if (!validation.valid) {
-                return { success: false, error: validation.error };
-            }
+            // Control de 72 horas deshabilitado temporalmente
+            // const validation = await this.validateSeventyTwoHours(flightId);
+            // if (!validation.valid) {
+            //     return { success: false, error: validation.error };
+            // }
 
             const flight = await this.getFlightData(flightId);
             if (!flight) {
@@ -277,6 +313,9 @@ class BookingService {
             this.vectorClock.increment();
             const currentClock = this.vectorClock.getClock();
 
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + this.reserveTimerSeconds);
+
             const seatState = await SeatState.findOneAndUpdate(
                 { flight_id: flightId, seat_number: seatNumber },
                 {
@@ -285,6 +324,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: classType,
                     status: 'RESERVED',
+                    reservation_expires_at: expiresAt,
                     refund_timer_expires_at: null,
                     vector_clock: currentClock,
                     last_passenger_id: passengerId,
@@ -294,6 +334,22 @@ class BookingService {
                 { upsert: true, new: true, runValidators: true }
             );
 
+            await redisClient.setEx(
+                this.getReservationKey(flightId, seatNumber),
+                this.reserveTimerSeconds,
+                JSON.stringify({
+                    flightId: flightId,
+                    seatNumber: seatNumber,
+                    passengerId: passengerId,
+                    expiresAt: expiresAt.toISOString()
+                })
+            );
+
+            const self = this;
+            setTimeout(async function () {
+                await self.releaseSeatAfterReservationTimeout(flightId, seatNumber);
+            }, this.reserveTimerMs);
+
             if (this.syncService) {
                 await this.syncService.broadcast('SEAT_RESERVED', {
                     flightId: flightId,
@@ -301,18 +357,20 @@ class BookingService {
                     seatNumber: seatNumber,
                     passengerId: passengerId,
                     classType: classType,
+                    expiresAt: expiresAt.toISOString(),
                     vectorClock: currentClock,
                     nodeId: this.nodeId
                 });
             }
 
-            console.log('[Booking] Asiento ' + seatNumber + ' reservado por nodo ' + this.nodeId);
+            console.log('[Booking] Asiento ' + seatNumber + ' reservado por nodo ' + this.nodeId + ' por 5 minutos');
 
             return {
                 success: true,
                 seat: seatState,
                 vectorClock: currentClock,
-                message: 'Asiento ' + seatNumber + ' reservado.'
+                expiresAt: expiresAt,
+                message: 'Asiento ' + seatNumber + ' reservado por 5 minutos.'
             };
         } catch (error) {
             console.error('[Booking] Error reservando asiento:', error);
@@ -363,6 +421,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: classType,
                     status: 'SOLD',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: null,
                     vector_clock: currentClock,
                     last_passenger_id: passengerId,
@@ -371,6 +430,8 @@ class BookingService {
                 },
                 { new: true, runValidators: true }
             );
+
+            await redisClient.del(this.getReservationKey(flightId, seatNumber));
 
             const ticketNumber = 'RP' + Date.now() + Math.floor(Math.random() * 1000);
 
@@ -445,6 +506,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: seat.seat_class,
                     status: 'REFUNDED',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: expiresAt,
                     vector_clock: currentClock,
                     last_passenger_id: passengerId,
@@ -500,6 +562,58 @@ class BookingService {
         }
     }
 
+    async releaseSeatAfterReservationTimeout(flightId, seatNumber) {
+        try {
+            const seat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
+
+            if (!seat || seat.status !== 'RESERVED') {
+                return;
+            }
+
+            if (seat.reservation_expires_at && new Date() < new Date(seat.reservation_expires_at)) {
+                return;
+            }
+
+            this.vectorClock.increment();
+            const currentClock = this.vectorClock.getClock();
+
+            await SeatState.findOneAndUpdate(
+                { flight_id: flightId, seat_number: seatNumber },
+                {
+                    flight_id: seat.flight_id,
+                    flight_number: seat.flight_number,
+                    seat_number: seat.seat_number,
+                    seat_class: seat.seat_class,
+                    status: 'AVAILABLE',
+                    reservation_expires_at: null,
+                    refund_timer_expires_at: null,
+                    vector_clock: currentClock,
+                    last_passenger_id: null,
+                    last_updated: new Date(),
+                    last_updated_by_node: this.nodeId
+                },
+                { new: true, runValidators: true }
+            );
+
+            await redisClient.del(this.getReservationKey(flightId, seatNumber));
+
+            if (this.syncService) {
+                await this.syncService.broadcast('SEAT_RESERVATION_EXPIRED', {
+                    flightId: flightId,
+                    flightNumber: seat.flight_number,
+                    seatNumber: seatNumber,
+                    classType: seat.seat_class,
+                    vectorClock: currentClock,
+                    nodeId: this.nodeId
+                });
+            }
+
+            console.log('[Booking] Reserva expirada: asiento ' + seatNumber + ' ahora esta LIBRE');
+        } catch (error) {
+            console.error('[Booking] Error liberando reserva vencida:', error);
+        }
+    }
+
     async releaseSeatAfterCatering(flightId, seatNumber) {
         try {
             const seat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
@@ -523,6 +637,7 @@ class BookingService {
                     seat_number: seat.seat_number,
                     seat_class: seat.seat_class,
                     status: 'AVAILABLE',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: null,
                     vector_clock: currentClock,
                     last_passenger_id: null,
@@ -558,6 +673,7 @@ class BookingService {
             const seatNumber = data.seatNumber;
             const passengerId = data.passengerId;
             const classType = data.classType;
+            const expiresAt = data.expiresAt;
             const vectorClock = data.vectorClock;
 
             const existingSeat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
@@ -580,6 +696,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: classType,
                     status: 'RESERVED',
+                    reservation_expires_at: expiresAt ? new Date(expiresAt) : null,
                     refund_timer_expires_at: null,
                     vector_clock: vectorClock,
                     last_passenger_id: passengerId,
@@ -624,6 +741,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: classType || (existingSeat ? existingSeat.seat_class : 'ECONOMY'),
                     status: 'SOLD',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: null,
                     vector_clock: vectorClock,
                     last_passenger_id: passengerId,
@@ -632,6 +750,8 @@ class BookingService {
                 },
                 { upsert: true, runValidators: true }
             );
+
+            await redisClient.del(this.getReservationKey(flightId, seatNumber));
 
             console.log('[Booking] Sincronizado: Asiento ' + seatNumber + ' VENDIDO por nodo ' + senderNodeId);
         } catch (error) {
@@ -668,6 +788,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: existingSeat ? existingSeat.seat_class : 'ECONOMY',
                     status: 'REFUNDED',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: new Date(expiresAt),
                     vector_clock: vectorClock,
                     last_passenger_id: passengerId,
@@ -721,6 +842,7 @@ class BookingService {
                     seat_number: seatNumber,
                     seat_class: classType || (existingSeat ? existingSeat.seat_class : 'ECONOMY'),
                     status: 'AVAILABLE',
+                    reservation_expires_at: null,
                     refund_timer_expires_at: null,
                     vector_clock: vectorClock,
                     last_passenger_id: null,
@@ -731,10 +853,57 @@ class BookingService {
             );
 
             await redisClient.del(this.getCateringKey(flightId, seatNumber));
+            await redisClient.del(this.getReservationKey(flightId, seatNumber));
 
             console.log('[Booking] Sincronizado: Asiento ' + seatNumber + ' LIBRE por nodo ' + senderNodeId);
         } catch (error) {
             console.error('[Booking] Error sincronizando disponibilidad remota:', error);
+        }
+    }
+
+    async handleRemoteReservationExpired(data, senderNodeId) {
+        try {
+            const flightId = data.flightId;
+            const flightNumber = data.flightNumber;
+            const seatNumber = data.seatNumber;
+            const classType = data.classType;
+            const vectorClock = data.vectorClock;
+
+            const existingSeat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
+
+            if (existingSeat && existingSeat.vector_clock) {
+                const isStale = this.isRemoteEventStale(vectorClock, existingSeat.vector_clock, senderNodeId);
+                if (isStale) {
+                    console.log('[Booking] Evento remoto expirado descartado por ser mas antiguo');
+                    return;
+                }
+            }
+
+            this.mergeRemoteVectorClock(vectorClock);
+
+            await SeatState.findOneAndUpdate(
+                { flight_id: flightId, seat_number: seatNumber },
+                {
+                    flight_id: flightId,
+                    flight_number: flightNumber || (existingSeat ? existingSeat.flight_number : 'UNKNOWN'),
+                    seat_number: seatNumber,
+                    seat_class: classType || (existingSeat ? existingSeat.seat_class : 'ECONOMY'),
+                    status: 'AVAILABLE',
+                    reservation_expires_at: null,
+                    refund_timer_expires_at: null,
+                    vector_clock: vectorClock,
+                    last_passenger_id: null,
+                    last_updated: new Date(),
+                    last_updated_by_node: senderNodeId
+                },
+                { upsert: true, runValidators: true }
+            );
+
+            await redisClient.del(this.getReservationKey(flightId, seatNumber));
+
+            console.log('[Booking] Sincronizado: reserva expirada, asiento ' + seatNumber + ' LIBRE por nodo ' + senderNodeId);
+        } catch (error) {
+            console.error('[Booking] Error sincronizando expiración de reserva:', error);
         }
     }
 }

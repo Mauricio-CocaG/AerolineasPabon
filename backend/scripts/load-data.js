@@ -71,18 +71,20 @@ async function resetAndLoad() {
     `);
     
     await pool.query(`
-        CREATE TABLE sales (
-            id SERIAL PRIMARY KEY,
-            ticket_number VARCHAR(20) UNIQUE NOT NULL,
-            flight_id INT REFERENCES flights(id),
-            passenger_id INT REFERENCES passengers(id),
-            seat_number VARCHAR(4),
-            class_type VARCHAR(20),
-            price_paid DECIMAL(10,2),
-            payment_status VARCHAR(20) DEFAULT 'PENDING',
-            sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+    CREATE TABLE sales (
+        id SERIAL PRIMARY KEY,
+        ticket_number VARCHAR(20) UNIQUE NOT NULL,
+        booking_reference VARCHAR(50),
+        flight_id INT REFERENCES flights(id),
+        passenger_id INT REFERENCES passengers(id),
+        seat_number VARCHAR(4),
+        class_type VARCHAR(20),
+        price_paid DECIMAL(10,2),
+        vector_clock_snapshot JSONB,
+        payment_status VARCHAR(20) DEFAULT 'PENDING',
+        sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`);
     
     await pool.query(`
         CREATE TABLE sync_log (
