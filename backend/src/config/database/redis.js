@@ -1,6 +1,5 @@
 ﻿const redis = require('redis');
-const config = require('../config/env'); // ajusta la ruta si este archivo está en otra carpeta
-
+const config = require('../env');
 const redisClient = redis.createClient({
     socket: {
         host: config.redis.host,
