@@ -1,18 +1,31 @@
 ﻿const redis = require('redis');
-require('dotenv').config();
+const config = require('../config/env'); // ajusta la ruta si este archivo está en otra carpeta
 
 const redisClient = redis.createClient({
     socket: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: process.env.REDIS_PORT || 6379,
+        host: config.redis.host,
+        port: config.redis.port,
     }
 });
 
-redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-redisClient.on('connect', () => console.log('Redis connected successfully'));
+redisClient.on('error', (err) => {
+    console.error('Redis Client Error:', err);
+});
+
+redisClient.on('connect', () => {
+    console.log('Redis connected successfully on ' + config.redis.host + ':' + config.redis.port);
+});
 
 const connectRedis = async () => {
-    await redisClient.connect();
+    try {
+        if (!redisClient.isOpen) {
+            await redisClient.connect();
+        }
+        return true;
+    } catch (error) {
+        console.error('Error connecting to Redis:', error.message);
+        return false;
+    }
 };
 
 module.exports = { redisClient, connectRedis };

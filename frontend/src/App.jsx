@@ -17,18 +17,28 @@ export default function App() {
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [bookingResult, setBookingResult] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
+const [dashboardLoading, setDashboardLoading] = useState(false);
+const [dashboardError, setDashboardError] = useState(null);
 
   useEffect(() => {
     if (!geo.loading) fetchDashboard();
   }, [geo.apiUrl, geo.loading]);
 
   const fetchDashboard = async () => {
-    try {
-      const r = await axios.get(geo.apiUrl + '/dashboard/stats');
-      setDashboardData(r.data);
-    } catch (e) { console.error(e); }
-  };
+  setDashboardLoading(true);
+  setDashboardError(null);
 
+  try {
+    const r = await axios.get(geo.apiUrl + '/dashboard/stats');
+    setDashboardData(r.data);
+  } catch (e) {
+    console.error(e);
+    setDashboardError(e.response?.data?.error || 'No se pudo cargar el dashboard');
+    setDashboardData(null);
+  } finally {
+    setDashboardLoading(false);
+  }
+};
   const handleFlightSelect = (flight) => {
     setSelectedFlight(flight);
     setSelectedSeat(null);
@@ -209,15 +219,37 @@ export default function App() {
 
         {activeTab === 'dashboard' && (
           <div className="fade-up">
-            {dashboardData
-              ? <Dashboard data={dashboardData} />
-              : (
-                <div className="card" style={{ textAlign: 'center', padding: '56px', color: '#6B7A99' }}>
-                  <i className="fa-solid fa-circle-notch fa-spin" style={{ fontSize: '1.5rem', marginBottom: '12px', display: 'block', color: '#3960FB' }} />
-                  {t('loadingDashboard')}
-                </div>
-              )
-            }
+            {dashboardLoading ? (
+  <div className="card" style={{ textAlign: 'center', padding: '56px', color: '#6B7A99' }}>
+    <i
+      className="fa-solid fa-circle-notch fa-spin"
+      style={{ fontSize: '1.5rem', marginBottom: '12px', display: 'block', color: '#3960FB' }}
+    />
+    {t('loadingDashboard')}
+  </div>
+) : dashboardError ? (
+  <div className="card" style={{ textAlign: 'center', padding: '56px' }}>
+    <i
+      className="fa-solid fa-triangle-exclamation"
+      style={{ fontSize: '1.6rem', marginBottom: '12px', display: 'block', color: '#EF4444' }}
+    />
+    <p style={{ color: '#EF4444', fontWeight: 700, marginBottom: '8px' }}>
+      Error al cargar el dashboard
+    </p>
+    <p style={{ color: '#6B7A99', marginBottom: '16px' }}>
+      {dashboardError}
+    </p>
+    <button className="btn-primary" onClick={fetchDashboard}>
+      Reintentar
+    </button>
+  </div>
+) : dashboardData ? (
+  <Dashboard data={dashboardData} />
+) : (
+  <div className="card" style={{ textAlign: 'center', padding: '56px', color: '#6B7A99' }}>
+    Sin datos disponibles
+  </div>
+)}
           </div>
         )}
       </main>

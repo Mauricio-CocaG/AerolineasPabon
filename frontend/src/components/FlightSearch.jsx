@@ -5,8 +5,7 @@ import axios from 'axios';
 export default function FlightSearch({ apiUrl, onFlightSelect }) {
   const API_URL = apiUrl || 'http://localhost:3001/api/v1';
   const { t } = useTranslation();
-  
-  // Estados de búsqueda
+
   const [airports, setAirports] = useState([]);
   const [origin, setOrigin] = useState(null);
   const [destination, setDestination] = useState(null);
@@ -16,66 +15,80 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [dateRange, setDateRange] = useState({ min: '', max: '' });
-  
-  // Dropdown states
+  const [searchError, setSearchError] = useState('');
+
   const [originDropdownOpen, setOriginDropdownOpen] = useState(false);
   const [destDropdownOpen, setDestDropdownOpen] = useState(false);
   const [originSearchTerm, setOriginSearchTerm] = useState('');
   const [destSearchTerm, setDestSearchTerm] = useState('');
   const [originFiltered, setOriginFiltered] = useState([]);
   const [destFiltered, setDestFiltered] = useState([]);
-  
-  // Paginación
+
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [totalResults, setTotalResults] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [hasPrev, setHasPrev] = useState(false);
-  
-  // Refs
+
   const originRef = useRef(null);
   const destRef = useRef(null);
-  
-  // Cargar aeropuertos
+
   useEffect(() => {
-    axios.get(API_URL + '/airports').then(r => {
-      const airportList = (r.data.airports || []).map(code => ({
-        code: code,
-        name: getAirportName(code),
-        city: getCityName(code),
-        country: getCountryName(code)
-      }));
-      setAirports(airportList);
-    }).catch(() => {});
+    axios.get(API_URL + '/airports')
+      .then(r => {
+        const airportList = (r.data.airports || []).map(code => ({
+          code,
+          name: getAirportName(code),
+          city: getCityName(code),
+          country: getCountryName(code),
+        }));
+        setAirports(airportList);
+      })
+      .catch(() => {
+        setAirports([]);
+      });
   }, [API_URL]);
-  
-  // Cargar rango de fechas disponibles cuando origen y destino cambian
+
   useEffect(() => {
     if (origin && destination) {
       fetchAvailableDates();
     }
   }, [origin, destination]);
-  
-  // Filtrar opciones
+
   useEffect(() => {
-    const filtered = airports.filter(a => 
+    const term = originSearchTerm.toLowerCase().trim();
+
+    const filtered = airports.filter(a =>
       (!destination || a.code !== destination.code) &&
-      (a.code.toLowerCase().includes(originSearchTerm.toLowerCase()) ||
-       a.city.toLowerCase().includes(originSearchTerm.toLowerCase()))
+      (
+        term === '' ||
+        a.code.toLowerCase().includes(term) ||
+        a.city.toLowerCase().includes(term) ||
+        a.country.toLowerCase().includes(term) ||
+        a.name.toLowerCase().includes(term)
+      )
     ).slice(0, 8);
+
     setOriginFiltered(filtered);
   }, [originSearchTerm, airports, destination]);
-  
+
   useEffect(() => {
-    const filtered = airports.filter(a => 
+    const term = destSearchTerm.toLowerCase().trim();
+
+    const filtered = airports.filter(a =>
       (!origin || a.code !== origin.code) &&
-      (a.code.toLowerCase().includes(destSearchTerm.toLowerCase()) ||
-       a.city.toLowerCase().includes(destSearchTerm.toLowerCase()))
+      (
+        term === '' ||
+        a.code.toLowerCase().includes(term) ||
+        a.city.toLowerCase().includes(term) ||
+        a.country.toLowerCase().includes(term) ||
+        a.name.toLowerCase().includes(term)
+      )
     ).slice(0, 8);
+
     setDestFiltered(filtered);
   }, [destSearchTerm, airports, origin]);
-  
-  // Cerrar dropdowns al hacer clic fuera
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (originRef.current && !originRef.current.contains(event.target)) {
@@ -85,62 +98,64 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
         setDestDropdownOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  
+
   const getAirportName = (code) => {
     const names = {
-      'ATL': 'Hartsfield-Jackson Atlanta Intl',
-      'PEK': 'Beijing Capital Intl',
-      'DXB': 'Dubai International',
-      'TYO': 'Tokyo Haneda Intl',
-      'LON': 'London Heathrow',
-      'LAX': 'Los Angeles Intl',
-      'PAR': 'Charles de Gaulle',
-      'FRA': 'Frankfurt Airport',
-      'IST': 'Istanbul Airport',
-      'SIN': 'Singapore Changi',
-      'MAD': 'Madrid-Barajas',
-      'AMS': 'Amsterdam Schiphol',
-      'DFW': 'Dallas/Fort Worth',
-      'CAN': 'Guangzhou Baiyun',
-      'SAO': 'São Paulo Guarulhos'
+      ATL: 'Hartsfield-Jackson Atlanta Intl',
+      PEK: 'Beijing Capital Intl',
+      DXB: 'Dubai International',
+      TYO: 'Tokyo Haneda Intl',
+      LON: 'London Heathrow',
+      LAX: 'Los Angeles Intl',
+      PAR: 'Charles de Gaulle',
+      FRA: 'Frankfurt Airport',
+      IST: 'Istanbul Airport',
+      SIN: 'Singapore Changi',
+      MAD: 'Madrid-Barajas',
+      AMS: 'Amsterdam Schiphol',
+      DFW: 'Dallas/Fort Worth',
+      CAN: 'Guangzhou Baiyun',
+      SAO: 'São Paulo Guarulhos'
     };
     return names[code] || `${code} Airport`;
   };
-  
+
   const getCityName = (code) => {
     const cities = {
-      'ATL': 'Atlanta', 'PEK': 'Beijing', 'DXB': 'Dubai', 'TYO': 'Tokyo',
-      'LON': 'London', 'LAX': 'Los Angeles', 'PAR': 'Paris', 'FRA': 'Frankfurt',
-      'IST': 'Istanbul', 'SIN': 'Singapore', 'MAD': 'Madrid', 'AMS': 'Amsterdam',
-      'DFW': 'Dallas', 'CAN': 'Guangzhou', 'SAO': 'São Paulo'
+      ATL: 'Atlanta', PEK: 'Beijing', DXB: 'Dubai', TYO: 'Tokyo',
+      LON: 'London', LAX: 'Los Angeles', PAR: 'Paris', FRA: 'Frankfurt',
+      IST: 'Istanbul', SIN: 'Singapore', MAD: 'Madrid', AMS: 'Amsterdam',
+      DFW: 'Dallas', CAN: 'Guangzhou', SAO: 'São Paulo'
     };
     return cities[code] || code;
   };
-  
+
   const getCountryName = (code) => {
     const countries = {
-      'ATL': 'USA', 'PEK': 'CHINA', 'DXB': 'UAE', 'TYO': 'JAPAN',
-      'LON': 'UK', 'LAX': 'USA', 'PAR': 'FRANCE', 'FRA': 'GERMANY',
-      'IST': 'TURKEY', 'SIN': 'SINGAPORE', 'MAD': 'SPAIN', 'AMS': 'NETHERLANDS',
-      'DFW': 'USA', 'CAN': 'CHINA', 'SAO': 'BRAZIL'
+      ATL: 'USA', PEK: 'China', DXB: 'UAE', TYO: 'Japan',
+      LON: 'UK', LAX: 'USA', PAR: 'France', FRA: 'Germany',
+      IST: 'Turkey', SIN: 'Singapore', MAD: 'Spain', AMS: 'Netherlands',
+      DFW: 'USA', CAN: 'China', SAO: 'Brazil'
     };
     return countries[code] || '';
   };
-  
+
   const fetchAvailableDates = async () => {
     try {
       const response = await axios.get(`${API_URL}/flights/available-dates`, {
         params: { origin: origin.code, destination: destination.code }
       });
+
       if (response.data.success && response.data.dates.length > 0) {
         setDateRange({
           min: response.data.minDate,
           max: response.data.maxDate
         });
-        // Auto-seleccionar el rango completo por defecto
+
         if (!startDate) setStartDate(response.data.minDate);
         if (!endDate) setEndDate(response.data.maxDate);
       }
@@ -148,16 +163,11 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
       console.error('Error fetching available dates:', error);
     }
   };
-  
+
   const searchFlights = async (page = 1) => {
-    if (!origin && !destination && !startDate && !endDate) {
-      setFlights([]);
-      setSearched(true);
-      setTotalResults(0);
-      return;
-    }
-    
     setLoading(true);
+    setSearchError('');
+
     try {
       const params = {};
       if (origin) params.origin = origin.code;
@@ -166,9 +176,9 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
       if (endDate) params.endDate = endDate;
       params.page = page;
       params.limit = 20;
-      
+
       const response = await axios.get(`${API_URL}/flights`, { params });
-      
+
       if (response.data.success) {
         setFlights(response.data.data);
         setCurrentPage(response.data.pagination.page);
@@ -180,28 +190,47 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
         setFlights([]);
         setTotalResults(0);
       }
+
       setSearched(true);
     } catch (error) {
       console.error('Error searching flights:', error);
       setFlights([]);
       setTotalResults(0);
       setSearched(true);
+      setSearchError(error.response?.data?.error || 'No se pudo realizar la búsqueda');
     } finally {
       setLoading(false);
     }
   };
-  
+
   const handleSearch = () => {
+    setSearchError('');
+
+    if (!origin || !destination) {
+      setSearchError('Selecciona origen y destino');
+      return;
+    }
+
+    if (origin.code === destination.code) {
+      setSearchError('El origen y el destino no pueden ser iguales');
+      return;
+    }
+
+    if (startDate && endDate && endDate < startDate) {
+      setSearchError('La fecha de vuelta no puede ser menor que la fecha de ida');
+      return;
+    }
+
     setCurrentPage(1);
     searchFlights(1);
   };
-  
+
   const goToPage = (newPage) => {
     if (newPage >= 1 && newPage <= totalPages) {
       searchFlights(newPage);
     }
   };
-  
+
   const swapLocations = () => {
     if (origin && destination) {
       const tempOrigin = origin;
@@ -209,89 +238,102 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
       setDestination(tempOrigin);
       setOriginSearchTerm(destination.city);
       setDestSearchTerm(tempOrigin.city);
-    } else if (origin && !destination) {
-      setDestination(origin);
-      setOrigin(null);
-      setDestSearchTerm(origin.city);
-      setOriginSearchTerm('');
-    } else if (!origin && destination) {
-      setOrigin(destination);
-      setDestination(null);
-      setOriginSearchTerm(destination.city);
-      setDestSearchTerm('');
     }
   };
-  
+
   const selectOrigin = (airport) => {
     setOrigin(airport);
     setOriginSearchTerm(airport.city);
     setOriginDropdownOpen(false);
+    setSearchError('');
   };
-  
+
   const selectDestination = (airport) => {
     setDestination(airport);
     setDestSearchTerm(airport.city);
     setDestDropdownOpen(false);
+    setSearchError('');
   };
-  
+
+  const clearOrigin = () => {
+    setOrigin(null);
+    setOriginSearchTerm('');
+  };
+
+  const clearDestination = () => {
+    setDestination(null);
+    setDestSearchTerm('');
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
     return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
   };
-  
+
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
     return timeStr.substring(0, 5);
   };
-  
+
   return (
     <div>
-      {/* Heading */}
       <div style={{ marginBottom: '28px' }}>
         <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#142258', marginBottom: '6px' }}>
           {t('searchTitle')}
         </h1>
         <p style={{ color: '#6B7A99', fontSize: '0.9rem' }}>{t('searchSubtitle')}</p>
       </div>
-      
-      {/* Search Card */}
+
       <div className="card fade-up" style={{ padding: '28px', marginBottom: '28px', background: '#ffffff', borderRadius: '24px' }}>
-        
-        {/* Fila 1: Origen y Destino */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '16px', marginBottom: '24px' }}>
           
-          {/* ORIGEN */}
+          {/* ORIGIN */}
           <div ref={originRef} style={{ position: 'relative' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#142258', fontSize: '0.75rem' }}>
               <i className="fa-solid fa-plane-departure" style={{ marginRight: '6px' }} />
               {t('origin')}
             </label>
-            <div 
-              onClick={() => setOriginDropdownOpen(!originDropdownOpen)}
-              style={{
-                border: originDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
-                borderRadius: '16px',
-                padding: '14px 16px',
-                cursor: 'pointer',
-                background: '#ffffff'
-              }}
-            >
-              {origin ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: '#142258' }}>{origin.city}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{origin.country}</div>
-                  </div>
-                  <span style={{ background: '#F1F5FF', padding: '2px 8px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, color: '#3960FB' }}>
-                    {origin.code}
-                  </span>
-                </div>
-              ) : (
-                <span style={{ color: '#B0BBD5' }}>{t('originPlaceholder')}</span>
-              )}
+
+            <div style={{
+              border: originDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
+              borderRadius: '16px',
+              background: '#ffffff',
+              padding: '10px 12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa-solid fa-location-dot" style={{ color: '#3960FB' }} />
+                <input
+                  type="text"
+                  value={origin ? `${origin.city} (${origin.code})` : originSearchTerm}
+                  onFocus={() => setOriginDropdownOpen(true)}
+                  onChange={(e) => {
+                    if (origin) setOrigin(null);
+                    setOriginSearchTerm(e.target.value);
+                    setOriginDropdownOpen(true);
+                  }}
+                  placeholder="Buscar ciudad, país o aeropuerto..."
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '0.92rem',
+                    color: '#142258',
+                    background: 'transparent'
+                  }}
+                />
+                {origin && (
+                  <button
+                    type="button"
+                    onClick={clearOrigin}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#B0BBD5' }}
+                  >
+                    <i className="fa-solid fa-xmark" />
+                  </button>
+                )}
+              </div>
             </div>
-            
+
             {originDropdownOpen && (
               <div style={{
                 position: 'absolute',
@@ -307,24 +349,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                 overflowY: 'auto',
                 border: '1px solid #F1F5FF'
               }}>
-                <div style={{ padding: '12px', borderBottom: '1px solid #F1F5FF' }}>
-                  <input
-                    type="text"
-                    placeholder="Buscar ciudad o aeropuerto..."
-                    value={originSearchTerm}
-                    onChange={(e) => setOriginSearchTerm(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      border: '1px solid #E2E8F0',
-                      borderRadius: '12px',
-                      fontSize: '0.85rem',
-                      outline: 'none'
-                    }}
-                    autoFocus
-                  />
-                </div>
-                {originFiltered.map(airport => (
+                {originFiltered.length > 0 ? originFiltered.map(airport => (
                   <div
                     key={airport.code}
                     onClick={() => selectOrigin(airport)}
@@ -343,23 +368,25 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                       <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
                       <div>
                         <div style={{ fontWeight: 700, color: '#142258' }}>{airport.city}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country} · {airport.name}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#B0BBD5' }}>{airport.name.substring(0, 20)}...</div>
-                    </div>
+                    <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
                   </div>
-                ))}
+                )) : (
+                  <div style={{ padding: '16px', color: '#6B7A99', fontSize: '0.85rem' }}>
+                    No se encontraron coincidencias
+                  </div>
+                )}
               </div>
             )}
           </div>
-          
-          {/* SWAP BUTTON */}
+
+          {/* SWAP */}
           <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '4px' }}>
             <button
               onClick={swapLocations}
+              type="button"
               style={{
                 width: '44px',
                 height: '44px',
@@ -373,38 +400,53 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
               <i className="fa-solid fa-arrow-right-arrow-left" />
             </button>
           </div>
-          
-          {/* DESTINO */}
+
+          {/* DESTINATION */}
           <div ref={destRef} style={{ position: 'relative' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#142258', fontSize: '0.75rem' }}>
               <i className="fa-solid fa-plane-arrival" style={{ marginRight: '6px' }} />
               {t('destination')}
             </label>
-            <div 
-              onClick={() => setDestDropdownOpen(!destDropdownOpen)}
-              style={{
-                border: destDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
-                borderRadius: '16px',
-                padding: '14px 16px',
-                cursor: 'pointer',
-                background: '#ffffff'
-              }}
-            >
-              {destination ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: '#142258' }}>{destination.city}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{destination.country}</div>
-                  </div>
-                  <span style={{ background: '#F1F5FF', padding: '2px 8px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, color: '#3960FB' }}>
-                    {destination.code}
-                  </span>
-                </div>
-              ) : (
-                <span style={{ color: '#B0BBD5' }}>{t('destPlaceholder')}</span>
-              )}
+
+            <div style={{
+              border: destDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
+              borderRadius: '16px',
+              background: '#ffffff',
+              padding: '10px 12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa-solid fa-location-dot" style={{ color: '#3960FB' }} />
+                <input
+                  type="text"
+                  value={destination ? `${destination.city} (${destination.code})` : destSearchTerm}
+                  onFocus={() => setDestDropdownOpen(true)}
+                  onChange={(e) => {
+                    if (destination) setDestination(null);
+                    setDestSearchTerm(e.target.value);
+                    setDestDropdownOpen(true);
+                  }}
+                  placeholder="Buscar ciudad, país o aeropuerto..."
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '0.92rem',
+                    color: '#142258',
+                    background: 'transparent'
+                  }}
+                />
+                {destination && (
+                  <button
+                    type="button"
+                    onClick={clearDestination}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#B0BBD5' }}
+                  >
+                    <i className="fa-solid fa-xmark" />
+                  </button>
+                )}
+              </div>
             </div>
-            
+
             {destDropdownOpen && (
               <div style={{
                 position: 'absolute',
@@ -420,24 +462,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                 overflowY: 'auto',
                 border: '1px solid #F1F5FF'
               }}>
-                <div style={{ padding: '12px', borderBottom: '1px solid #F1F5FF' }}>
-                  <input
-                    type="text"
-                    placeholder="Buscar ciudad o aeropuerto..."
-                    value={destSearchTerm}
-                    onChange={(e) => setDestSearchTerm(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      border: '1px solid #E2E8F0',
-                      borderRadius: '12px',
-                      fontSize: '0.85rem',
-                      outline: 'none'
-                    }}
-                    autoFocus
-                  />
-                </div>
-                {destFiltered.map(airport => (
+                {destFiltered.length > 0 ? destFiltered.map(airport => (
                   <div
                     key={airport.code}
                     onClick={() => selectDestination(airport)}
@@ -456,22 +481,23 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                       <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
                       <div>
                         <div style={{ fontWeight: 700, color: '#142258' }}>{airport.city}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country} · {airport.name}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#B0BBD5' }}>{airport.name.substring(0, 20)}...</div>
-                    </div>
+                    <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
                   </div>
-                ))}
+                )) : (
+                  <div style={{ padding: '16px', color: '#6B7A99', fontSize: '0.85rem' }}>
+                    No se encontraron coincidencias
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
-        
-        {/* Fila 2: Rango de fechas */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+
+        {/* FECHAS */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
           <div>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#142258', fontSize: '0.75rem' }}>
               <i className="fa-solid fa-calendar" style={{ marginRight: '6px' }} />
@@ -493,7 +519,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
               max={dateRange.max || '2026-04-30'}
             />
           </div>
-          
+
           <div>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#142258', fontSize: '0.75rem' }}>
               <i className="fa-solid fa-calendar" style={{ marginRight: '6px' }} />
@@ -516,15 +542,29 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
             />
           </div>
         </div>
-        
-        {/* Indicador de rango de fechas disponible */}
+
         {origin && destination && dateRange.min && dateRange.max && (
-          <div style={{ marginBottom: '16px', fontSize: '0.7rem', color: '#6B7A99', textAlign: 'center' }}>
+          <div style={{ marginBottom: '16px', fontSize: '0.75rem', color: '#6B7A99', textAlign: 'center' }}>
             📅 Vuelos disponibles entre {formatDate(dateRange.min)} y {formatDate(dateRange.max)}
           </div>
         )}
-        
-        {/* Botón Buscar */}
+
+        {searchError && (
+          <div style={{
+            marginBottom: '16px',
+            background: '#FEF2F2',
+            color: '#B91C1C',
+            border: '1px solid #FECACA',
+            borderRadius: '12px',
+            padding: '12px 14px',
+            fontSize: '0.85rem',
+            fontWeight: 600
+          }}>
+            <i className="fa-solid fa-circle-exclamation" style={{ marginRight: '8px' }} />
+            {searchError}
+          </div>
+        )}
+
         <button
           onClick={handleSearch}
           disabled={loading}
@@ -541,35 +581,72 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
             opacity: loading ? 0.7 : 1
           }}
         >
-          {loading ? <><i className="fa-solid fa-circle-notch fa-spin" /> Buscando...</> : <><i className="fa-solid fa-magnifying-glass" /> {t('search')}</>}
+          {loading
+            ? <><i className="fa-solid fa-circle-notch fa-spin" /> Buscando...</>
+            : <><i className="fa-solid fa-magnifying-glass" /> {t('search')}</>
+          }
         </button>
       </div>
-      
-      {/* RESULTADOS */}
+
       {searched && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
             <p style={{ fontWeight: 700, color: '#142258' }}>
               {totalResults > 0 ? `${totalResults.toLocaleString()} vuelos encontrados` : 'No se encontraron vuelos'}
             </p>
+
             {totalPages > 0 && (
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={() => goToPage(currentPage - 1)} disabled={!hasPrev} style={{ padding: '6px 14px', borderRadius: '30px', border: '1px solid #E2E8F0', background: hasPrev ? '#fff' : '#F8FAFC', cursor: hasPrev ? 'pointer' : 'not-allowed' }}>← Anterior</button>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={!hasPrev}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '30px',
+                    border: '1px solid #E2E8F0',
+                    background: hasPrev ? '#fff' : '#F8FAFC',
+                    cursor: hasPrev ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  ← Anterior
+                </button>
                 <span>Página {currentPage} de {totalPages}</span>
-                <button onClick={() => goToPage(currentPage + 1)} disabled={!hasNext} style={{ padding: '6px 14px', borderRadius: '30px', border: '1px solid #E2E8F0', background: hasNext ? '#fff' : '#F8FAFC', cursor: hasNext ? 'pointer' : 'not-allowed' }}>Siguiente →</button>
+                <button
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={!hasNext}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '30px',
+                    border: '1px solid #E2E8F0',
+                    background: hasNext ? '#fff' : '#F8FAFC',
+                    cursor: hasNext ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Siguiente →
+                </button>
               </div>
             )}
           </div>
-          
+
           {flights.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {flights.map(flight => (
-                <div key={flight.id} style={{ padding: '20px', background: '#fff', borderRadius: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <div
+                  key={flight.id}
+                  style={{
+                    padding: '20px',
+                    background: '#fff',
+                    borderRadius: '20px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                  }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div>
                       <div style={{ marginBottom: '8px' }}>
                         <span style={{ fontWeight: 700 }}>{flight.flight_number}</span>
-                        <span style={{ marginLeft: '12px', fontSize: '0.7rem', background: '#E6FBF1', padding: '2px 8px', borderRadius: '20px', color: '#0CAF60' }}>{flight.status}</span>
+                        <span style={{ marginLeft: '12px', fontSize: '0.7rem', background: '#E6FBF1', padding: '2px 8px', borderRadius: '20px', color: '#0CAF60' }}>
+                          {flight.status}
+                        </span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                         <div style={{ textAlign: 'center' }}>
@@ -588,10 +665,26 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                         {formatDate(flight.departure_date)} · Puerta {flight.gate || 'TBD'}
                       </div>
                     </div>
+
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '0.6rem', color: '#B0BBD5' }}>Desde</div>
-                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3960FB' }}>${flight.economy_price || 250}</div>
-                      <button onClick={() => onFlightSelect(flight)} style={{ marginTop: '8px', padding: '8px 20px', background: '#3960FB', border: 'none', borderRadius: '30px', color: '#fff', cursor: 'pointer' }}>Seleccionar</button>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3960FB' }}>
+                        ${flight.economy_price || 250}
+                      </div>
+                      <button
+                        onClick={() => onFlightSelect(flight)}
+                        style={{
+                          marginTop: '8px',
+                          padding: '8px 20px',
+                          background: '#3960FB',
+                          border: 'none',
+                          borderRadius: '30px',
+                          color: '#fff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Seleccionar
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -600,7 +693,9 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
           ) : (
             <div style={{ textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '24px' }}>
               <p>No se encontraron vuelos para los filtros seleccionados.</p>
-              <p style={{ fontSize: '0.8rem', color: '#6B7A99' }}>Prueba con otras fechas entre {dateRange.min || 'marzo'} y {dateRange.max || 'abril'} 2026</p>
+              <p style={{ fontSize: '0.8rem', color: '#6B7A99' }}>
+                Prueba con otras fechas entre {dateRange.min || 'marzo'} y {dateRange.max || 'abril'} 2026
+              </p>
             </div>
           )}
         </div>

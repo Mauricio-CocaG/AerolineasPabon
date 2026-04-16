@@ -9,23 +9,23 @@ module.exports = {
     // Database configuration
     postgres: {
         host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT) || 5432,
+        port: parseInt(process.env.POSTGRES_PORT) || 5433,
         user: process.env.POSTGRES_USER || 'admin',
         password: process.env.POSTGRES_PASSWORD || 'secret',
         database: process.env.POSTGRES_DB || 'rafael_pabon',
     },
     
     mongodb: {
-        url: process.env.MONGODB_URL || 'mongodb://localhost:27017/rafael_pabon',
+        url: process.env.MONGODB_URL || 'mongodb://localhost:27018/rafael_pabon',
     },
     
     redis: {
         host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT) || 6379,
+        port: parseInt(process.env.REDIS_PORT) || 6380,
     },
     
     rabbitmq: {
-        url: process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672',
+        url: process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5673',
     },
     
     // Business rules
