@@ -18,7 +18,7 @@ class BookingService {
         this.reserveTimerSeconds = 300;
         this.reserveTimerMs = this.reserveTimerSeconds * 1000;
 
-        // Lock corto distribuido
+        // Lock distribuido corto
         this.processingLockSeconds = Number(process.env.SEAT_LOCK_SECONDS || 30);
 
         this.registerSyncHandlers();
@@ -181,7 +181,7 @@ class BookingService {
     }
     */
 
-    // Deshabilitada temporalmente para pruebas
+    // Deshabilitada temporalmente
     async validateSeventyTwoHours(flightId) {
         return { valid: true };
     }
@@ -401,6 +401,28 @@ class BookingService {
                 return { success: false, error: 'Asiento ya esta vendido' };
             }
 
+            if (seat.status === 'RESERVED' && seat.reservation_expires_at) {
+                if (new Date() > new Date(seat.reservation_expires_at)) {
+                    await this.releaseSeatAfterReservationTimeout(flightId, seatNumber);
+
+                    const refreshedSeat = await SeatState.findOne({
+                        flight_id: flightId,
+                        seat_number: seatNumber
+                    });
+
+                    if (!refreshedSeat || refreshedSeat.status !== 'AVAILABLE') {
+                        return { success: false, error: 'No se pudo liberar la reserva expirada. Intenta de nuevo.' };
+                    }
+                } else {
+                    if (Number(seat.last_passenger_id) !== Number(passengerId)) {
+                        return {
+                            success: false,
+                            error: 'Este asiento esta reservado temporalmente por otro pasajero.'
+                        };
+                    }
+                }
+            }
+
             if (seat.status === 'REFUNDED') {
                 return { success: false, error: 'Asiento en proceso de devolucion. Espera 15 minutos.' };
             }
@@ -408,6 +430,34 @@ class BookingService {
             lockInfo = await this.acquireSeatLock(flightId, seatNumber);
             if (!lockInfo.lockAcquired) {
                 return { success: false, error: 'Asiento esta siendo procesado' };
+            }
+
+            const latestSeat = await SeatState.findOne({
+                flight_id: flightId,
+                seat_number: seatNumber
+            });
+
+            if (!latestSeat) {
+                return { success: false, error: 'Asiento no encontrado para este vuelo' };
+            }
+
+            if (latestSeat.status === 'RESERVED' && latestSeat.reservation_expires_at) {
+                if (new Date() > new Date(latestSeat.reservation_expires_at)) {
+                    await this.releaseSeatAfterReservationTimeout(flightId, seatNumber);
+                } else if (Number(latestSeat.last_passenger_id) !== Number(passengerId)) {
+                    return {
+                        success: false,
+                        error: 'Este asiento esta reservado temporalmente por otro pasajero.'
+                    };
+                }
+            }
+
+            if (latestSeat.status === 'SOLD') {
+                return { success: false, error: 'Asiento ya esta vendido' };
+            }
+
+            if (latestSeat.status === 'REFUNDED') {
+                return { success: false, error: 'Asiento en proceso de devolucion. Espera 15 minutos.' };
             }
 
             this.vectorClock.increment();
@@ -419,7 +469,7 @@ class BookingService {
                     flight_id: flightId,
                     flight_number: flight.flight_number,
                     seat_number: seatNumber,
-                    seat_class: classType,
+                    seat_class: latestSeat.seat_class || classType,
                     status: 'SOLD',
                     reservation_expires_at: null,
                     refund_timer_expires_at: null,
@@ -437,7 +487,16 @@ class BookingService {
 
             const sale = await pool.query(
                 'INSERT INTO sales (ticket_number, flight_id, passenger_id, seat_number, class_type, price_paid, vector_clock_snapshot, payment_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-                [ticketNumber, flightId, passengerId, seatNumber, classType, price, JSON.stringify(currentClock), 'COMPLETED']
+                [
+                    ticketNumber,
+                    flightId,
+                    passengerId,
+                    seatNumber,
+                    latestSeat.seat_class || classType,
+                    price,
+                    JSON.stringify(currentClock),
+                    'COMPLETED'
+                ]
             );
 
             if (this.syncService) {
@@ -446,7 +505,7 @@ class BookingService {
                     flightNumber: flight.flight_number,
                     seatNumber: seatNumber,
                     passengerId: passengerId,
-                    classType: classType,
+                    classType: latestSeat.seat_class || classType,
                     price: price,
                     vectorClock: currentClock,
                     nodeId: this.nodeId
