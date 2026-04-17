@@ -391,11 +391,23 @@ class BookingService {
                 return { success: false, error: 'Vuelo no encontrado' };
             }
 
-            const seat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
+            let seat = await SeatState.findOne({ flight_id: flightId, seat_number: seatNumber });
 
-            if (!seat) {
-                return { success: false, error: 'Asiento no encontrado para este vuelo' };
-            }
+if (!seat) {
+    seat = await SeatState.create({
+        flight_id: flightId,
+        flight_number: flight.flight_number,
+        seat_number: seatNumber,
+        seat_class: classType,
+        status: 'AVAILABLE',
+        reservation_expires_at: null,
+        refund_timer_expires_at: null,
+        vector_clock: this.vectorClock.getClock(),
+        last_passenger_id: null,
+        last_updated: new Date(),
+        last_updated_by_node: this.nodeId
+    });
+}
 
             if (seat.status === 'SOLD') {
                 return { success: false, error: 'Asiento ya esta vendido' };
