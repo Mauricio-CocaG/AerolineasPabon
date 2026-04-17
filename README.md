@@ -553,4 +553,14 @@ UPDATE flights SET
 WHERE economy_price IS NULL OR economy_price = 0;
 
 "
+poner en marcha los nodos
+$env:NODE_ID=2
+$env:NODE_NAME="MADRID"
+$env:PORT=3002
+npm start
+
+$env:NODE_ID=3
+$env:NODE_NAME="TOKIO"
+$env:PORT=3003
+npm start
 
