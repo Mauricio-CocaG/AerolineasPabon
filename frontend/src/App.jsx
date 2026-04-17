@@ -8,23 +8,64 @@ import BookingForm from './components/BookingForm';
 import LanguageSwitcher from './components/LanguageSwitcher';
 import { useGeolocation } from './hooks/useGeolocation';
 
+// Configuración de los 3 nodos
+const NODES = {
+  1: { name: 'BOGOTÁ', country: 'Colombia', url: 'http://localhost:3001', apiUrl: 'http://localhost:3001/api/v1', lat: 4.7110, lng: -74.0721 },
+  2: { name: 'MADRID', country: 'España', url: 'http://localhost:3002', apiUrl: 'http://localhost:3002/api/v1', lat: 40.4168, lng: -3.7038 },
+  3: { name: 'TOKIO', country: 'Japón', url: 'http://localhost:3003', apiUrl: 'http://localhost:3003/api/v1', lat: 35.6762, lng: 139.6503 }
+};
+
 export default function App() {
   const { t } = useTranslation();
   const geo = useGeolocation();
-
+  
+  // Estado del nodo seleccionado manualmente
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [apiUrl, setApiUrl] = useState(geo.apiUrl || 'http://localhost:3001/api/v1');
+  const [vectorClock, setVectorClock] = useState(null);
+  
   const [activeTab, setActiveTab] = useState('search');
   const [selectedFlight, setSelectedFlight] = useState(null);
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [bookingResult, setBookingResult] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
 
+  // Cambiar de nodo manualmente
+  const handleNodeChange = (nodeId) => {
+    setSelectedNode(nodeId);
+    setApiUrl(NODES[nodeId].apiUrl);
+    // Resetear datos al cambiar de nodo
+    setSelectedFlight(null);
+    setSelectedSeat(null);
+    setBookingResult(null);
+    setActiveTab('search');
+  };
+
+  // Obtener reloj vectorial del nodo actual
+  const fetchVectorClock = async () => {
+    try {
+      const response = await axios.get(`${apiUrl}/vector-clock`);
+      setVectorClock(response.data.vectorClock);
+    } catch (error) {
+      console.error('Error fetching vector clock:', error);
+    }
+  };
+
   useEffect(() => {
-    if (!geo.loading) fetchDashboard();
-  }, [geo.apiUrl, geo.loading]);
+    if (!geo.loading) {
+      fetchDashboard();
+      fetchVectorClock();
+    }
+    // Actualizar cada 5 segundos
+    const interval = setInterval(() => {
+      if (apiUrl) fetchVectorClock();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [apiUrl, geo.loading]);
 
   const fetchDashboard = async () => {
     try {
-      const r = await axios.get(geo.apiUrl + '/dashboard/stats');
+      const r = await axios.get(apiUrl + '/dashboard/stats');
       setDashboardData(r.data);
     } catch (e) { console.error(e); }
   };
@@ -44,6 +85,7 @@ export default function App() {
   const handleBookingComplete = (result) => {
     setBookingResult(result);
     fetchDashboard();
+    fetchVectorClock();
     setActiveTab('result');
   };
 
@@ -52,6 +94,9 @@ export default function App() {
     { id: 'dashboard', label: t('dashboard'),  icon: 'fa-chart-pie' },
     ...(selectedFlight ? [{ id: 'seats', label: t('seats'), icon: 'fa-chair' }] : []),
   ];
+
+  // Determinar el nodo actual a mostrar
+  const currentNode = selectedNode ? NODES[selectedNode] : (geo.node || NODES[1]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#EBEFFF' }}>
@@ -63,7 +108,7 @@ export default function App() {
         position: 'sticky', top: 0, zIndex: 100,
       }}>
         <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 10px', flexWrap: 'wrap', gap: '12px' }}>
 
             {/* Brand */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -84,29 +129,56 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right: node indicator + lang */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {/* Selector de Nodos y estado */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
               <div style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                background: 'rgba(255,255,255,0.14)',
-                borderRadius: '999px', padding: '6px 14px',
+                display: 'flex',
+                background: 'rgba(255,255,255,0.12)',
+                borderRadius: '40px',
+                padding: '4px',
+                gap: '4px'
               }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 6px #4ADE80', flexShrink: 0 }} />
-                {geo.loading ? (
-                  <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.78rem' }}>{t('detecting')}</span>
-                ) : (
-                  <span style={{ color: '#ffffff', fontSize: '0.78rem', fontWeight: 500 }}>
-                    <i className="fa-solid fa-location-dot" style={{ marginRight: '5px', opacity: 0.7 }} />
-                    {geo.city} &rarr; <strong>{geo.node.name}</strong>
-                  </span>
-                )}
+                {Object.entries(NODES).map(([id, node]) => (
+                  <button
+                    key={id}
+                    onClick={() => handleNodeChange(parseInt(id))}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: '32px',
+                      border: 'none',
+                      background: (selectedNode ? selectedNode === parseInt(id) : geo.node?.id === parseInt(id)) ? '#ffffff' : 'transparent',
+                      color: (selectedNode ? selectedNode === parseInt(id) : geo.node?.id === parseInt(id)) ? '#142258' : 'rgba(255,255,255,0.8)',
+                      fontWeight: 600,
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    🌍 {node.name}
+                  </button>
+                ))}
               </div>
+              
+              {/* Reloj Vectorial */}
+              {vectorClock && (
+                <div style={{
+                  background: 'rgba(255,255,255,0.12)',
+                  borderRadius: '20px',
+                  padding: '4px 12px',
+                  fontSize: '0.7rem',
+                  fontFamily: 'monospace',
+                  color: '#ffffff'
+                }}>
+                  🕐 VC: [{vectorClock.node_1 || 0}, {vectorClock.node_2 || 0}, {vectorClock.node_3 || 0}]
+                </div>
+              )}
+              
               <LanguageSwitcher />
             </div>
           </div>
 
           {/* Nav tabs */}
-          <div style={{ display: 'flex', gap: '4px', paddingBottom: '12px' }}>
+          <div style={{ display: 'flex', gap: '4px', paddingBottom: '12px', overflowX: 'auto' }}>
             {tabs.map(tab => (
               <button
                 key={tab.id}
@@ -131,9 +203,31 @@ export default function App() {
       {/* ── MAIN ── */}
       <main style={{ maxWidth: '1100px', margin: '0 auto', padding: '8px 24px 56px', position: 'relative', zIndex: 1 }}>
 
+        {/* Indicador del nodo activo */}
+        <div className="card" style={{ marginBottom: '20px', padding: '12px 20px', background: '#ffffff', borderRadius: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '10px', height: '10px', borderRadius: '50%',
+                background: '#4ADE80', boxShadow: '0 0 8px #4ADE80'
+              }} />
+              <span style={{ fontWeight: 600, color: '#142258' }}>
+                Conectado a: <strong style={{ color: '#3960FB' }}>{currentNode.name}</strong> ({currentNode.country})
+              </span>
+              <span style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+                API: {currentNode.url}
+              </span>
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+              <i className="fa-solid fa-clock-rotate-left" style={{ marginRight: '4px' }} />
+              Reloj Vectorial: [{vectorClock?.node_1 || 0}, {vectorClock?.node_2 || 0}, {vectorClock?.node_3 || 0}]
+            </div>
+          </div>
+        </div>
+
         {activeTab === 'search' && (
           <div className="fade-up">
-            <FlightSearch apiUrl={geo.apiUrl} onFlightSelect={handleFlightSelect} />
+            <FlightSearch apiUrl={apiUrl} onFlightSelect={handleFlightSelect} />
           </div>
         )}
 
@@ -170,7 +264,7 @@ export default function App() {
             </div>
 
             <SeatMap
-              apiUrl={geo.apiUrl}
+              apiUrl={apiUrl}
               flightId={selectedFlight.id}
               onSeatSelect={handleSeatSelect}
               flight={selectedFlight}
@@ -181,7 +275,7 @@ export default function App() {
         {activeTab === 'booking' && selectedFlight && selectedSeat && (
           <div className="fade-up">
             <BookingForm
-              apiUrl={geo.apiUrl}
+              apiUrl={apiUrl}
               flight={selectedFlight}
               seat={selectedSeat}
               onComplete={handleBookingComplete}
@@ -195,7 +289,7 @@ export default function App() {
             <BoardingPassResult
               result={bookingResult}
               flight={selectedFlight}
-              apiUrl={geo.apiUrl}
+              apiUrl={apiUrl}
               onNew={() => {
                 setActiveTab('search');
                 setSelectedFlight(null);
@@ -261,7 +355,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 5px #4ADE80', flexShrink: 0 }} />
                 <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.22)', letterSpacing: '0.04em' }}>
-                  {geo.loading ? 'Conectando...' : `Nodo ${geo.node?.name || '—'} activo`}
+                  Nodo {currentNode.name} activo
                 </span>
               </div>
               <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.15)' }}>
@@ -297,20 +391,23 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
     );
   }
 
-  const sale    = result.sale;
+  const sale = result.sale;
   const isFirst = sale?.class_type === 'FIRST';
-  const accent  = isFirst ? '#D97706' : '#3960FB';
+  const accent = isFirst ? '#D97706' : '#3960FB';
 
   const handleWallet = async () => {
     if (walletQr) { setWalletQr(null); setWalletViewUrl(null); setGoogleWalletUrl(null); return; }
     setLoadingWallet(true);
     try {
-      const r = await import('axios').then(m => m.default.get(apiUrl + '/boarding-pass/wallet?ticket=' + sale?.ticket_number));
+      const r = await axios.get(apiUrl + '/boarding-pass/wallet?ticket=' + sale?.ticket_number);
       setWalletQr(r.data.qrCode);
       setWalletViewUrl(r.data.viewUrl || null);
       setGoogleWalletUrl(r.data.googleWalletUrl || null);
-    } catch { /* ignore */ }
-    finally { setLoadingWallet(false); }
+    } catch (error) {
+      console.error('Error fetching wallet:', error);
+    } finally {
+      setLoadingWallet(false);
+    }
   };
 
   return (
@@ -363,10 +460,10 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
         {/* Info grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '18px' }}>
           {[
-            { label: t('class'),  value: isFirst ? t('firstClass') : t('economy'), color: accent },
-            { label: t('seat'),   value: sale?.seat_number,                         color: '#142258' },
-            { label: t('gate'),   value: flight?.gate || '—',                       color: '#142258' },
-            { label: t('total'),  value: '$' + parseFloat(sale?.price_paid || 0).toLocaleString(), color: accent },
+            { label: t('class'), value: isFirst ? t('firstClass') : t('economy'), color: accent },
+            { label: t('seat'), value: sale?.seat_number, color: '#142258' },
+            { label: t('gate'), value: flight?.gate || '—', color: '#142258' },
+            { label: t('total'), value: '$' + parseFloat(sale?.price_paid || 0).toLocaleString(), color: accent },
           ].map(({ label, value, color }) => (
             <div key={label}>
               <p style={{ fontSize: '0.6rem', fontWeight: 700, color: '#9AAAC2', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>{label}</p>
@@ -415,7 +512,6 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
         {/* Wallet QR panel */}
         {walletQr && (
           <div style={{ background: 'linear-gradient(160deg,#060818 0%,#0D1B4B 100%)', borderRadius: '18px', padding: '20px', marginBottom: '10px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
-            {/* Glow blob */}
             <div style={{ position: 'absolute', top: '-40px', left: '50%', transform: 'translateX(-50%)', width: '200px', height: '200px', borderRadius: '50%', background: 'radial-gradient(circle,rgba(57,96,251,0.35) 0%,transparent 70%)', pointerEvents: 'none' }} />
 
             <p style={{ fontSize: '0.62rem', fontWeight: 700, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '14px', position: 'relative' }}>
@@ -423,7 +519,6 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
               Escanear con tu telefono
             </p>
 
-            {/* QR code */}
             <div style={{ display: 'inline-block', background: '#ffffff', borderRadius: '14px', padding: '10px', boxShadow: '0 8px 32px rgba(57,96,251,0.4)', position: 'relative', marginBottom: '14px' }}>
               <img src={walletQr} alt="Wallet QR" style={{ width: '220px', height: '220px', display: 'block', borderRadius: '6px' }} />
             </div>
@@ -432,7 +527,6 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
               Escanea para abrir tu pase de abordar digital
             </p>
 
-            {/* Google Wallet button */}
             {googleWalletUrl && (
               <a
                 href={googleWalletUrl}
@@ -447,7 +541,6 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
                   boxShadow: '0 4px 18px rgba(0,0,0,0.5)',
                 }}
               >
-                {/* Google 4-color circle */}
                 <svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
                   <path d="M11 0C4.925 0 0 4.925 0 11s4.925 11 11 11 11-4.925 11-11S17.075 0 11 0z" fill="#4285F4"/>
                   <path d="M11 0C4.925 0 0 4.925 0 11h11V0z" fill="#EA4335"/>
@@ -458,7 +551,6 @@ function BoardingPassResult({ result, flight, apiUrl, onNew, t }) {
               </a>
             )}
 
-            {/* Open web view button */}
             {walletViewUrl && (
               <button
                 className="btn-outline"
