@@ -1,13 +1,44 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { gsap } from 'gsap';
 
 function ProgressBar({ value, max, color }) {
+  const fillRef = useRef(null);
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  useEffect(() => {
+    if (fillRef.current) {
+      gsap.fromTo(fillRef.current,
+        { width: '0%' },
+        { width: pct + '%', duration: 1.1, ease: 'power2.out', delay: 0.6 }
+      );
+    }
+  }, [pct]);
   return (
-    <div className="progress-bar">
-      <div className="progress-fill" style={{ width: pct + '%', background: color }} />
+    <div className="progress-track">
+      <div ref={fillRef} className="progress-fill" style={{ width: '0%', background: color }} />
     </div>
   );
+}
+
+function AnimatedVal({ value, prefix = '', suffix = '' }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const num = parseFloat(String(value).replace(/[^0-9.]/g, ''));
+    if (isNaN(num)) return;
+    gsap.fromTo({ v: 0 }, { v: num }, {
+      duration: 1.2,
+      ease: 'power2.out',
+      delay: 0.15,
+      onUpdate: function () {
+        if (ref.current) {
+          const rounded = Number.isInteger(num) ? Math.round(this.targets()[0].v) : this.targets()[0].v.toFixed(2);
+          ref.current.textContent = prefix + rounded + suffix;
+        }
+      }
+    });
+  }, [value]);
+  return <span ref={ref}>{prefix}{value}{suffix}</span>;
 }
 
 export default function Dashboard({ data }) {
@@ -15,92 +46,119 @@ export default function Dashboard({ data }) {
   const { sales, seats, flights, sync, nodeInfo, revenue } = data;
   const vc = nodeInfo?.vectorClock || {};
 
+  const titleRef = useRef(null);
+  const kpiRef = useRef(null);
+  const gridRef = useRef(null);
+
+  useEffect(() => {
+    if (titleRef.current) {
+      gsap.fromTo(titleRef.current.children,
+        { opacity: 0, y: 18 },
+        { opacity: 1, y: 0, duration: 0.4, stagger: 0.08, ease: 'power3.out' }
+      );
+    }
+    if (kpiRef.current) {
+      gsap.fromTo(kpiRef.current.querySelectorAll('.kpi'),
+        { opacity: 0, y: 24, scale: 0.94 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.42, stagger: 0.07, ease: 'back.out(1.3)', delay: 0.15 }
+      );
+    }
+    if (gridRef.current) {
+      gsap.fromTo(gridRef.current.querySelectorAll('.dash-card'),
+        { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.42, stagger: 0.07, ease: 'power3.out', delay: 0.4 }
+      );
+    }
+  }, []);
+
   const kpis = [
     {
       label:  t('totalRevenue'),
       value:  sales?.total_revenue_formatted || '$0.00',
       sub:    `${sales?.total_sales || 0} ${t('sales')}`,
       icon:   'fa-dollar-sign',
-      color:  '#3960FB', bg: '#EBEFFF', accent: '#3960FB',
+      color:  'var(--blue)', bg: 'var(--bl)', accent: 'var(--blue)',
     },
     {
       label:  t('occupancyRate'),
       value:  (seats?.sold_percentage || 0) + '%',
       sub:    `${seats?.sold || 0} ${t('soldSeats')}`,
       icon:   'fa-chair',
-      color:  '#0CAF60', bg: '#E6FBF1', accent: '#0CAF60',
+      color:  'var(--green)', bg: 'rgba(34,200,128,.1)', accent: 'var(--green)',
     },
     {
       label:  t('totalSales'),
       value:  String(sales?.total_sales || 0),
       sub:    `${sales?.unique_passengers || 0} ${t('uniquePassengers')}`,
       icon:   'fa-ticket',
-      color:  '#7C3AED', bg: '#F5F0FF', accent: '#7C3AED',
+      color:  '#A855F7', bg: 'rgba(168,85,247,.1)', accent: '#A855F7',
     },
     {
       label:  t('syncStatus'),
       value:  sync?.is_healthy ? t('active') : t('offline'),
       sub:    sync?.mode || '—',
       icon:   sync?.is_healthy ? 'fa-circle-check' : 'fa-circle-xmark',
-      color:  sync?.is_healthy ? '#0CAF60' : '#EF4444',
-      bg:     sync?.is_healthy ? '#E6FBF1' : '#FEF2F2',
-      accent: sync?.is_healthy ? '#0CAF60' : '#EF4444',
+      color:  sync?.is_healthy ? 'var(--green)' : 'var(--red)',
+      bg:     sync?.is_healthy ? 'rgba(34,200,128,.1)' : 'rgba(255,80,80,.1)',
+      accent: sync?.is_healthy ? 'var(--green)' : 'var(--red)',
     },
   ];
 
   const seatRows = [
-    { label: t('available'), value: seats?.available || 0, color: '#3960FB', total: seats?.total || 1 },
-    { label: t('reserved'),  value: seats?.reserved  || 0, color: '#CA8A04', total: seats?.total || 1 },
-    { label: t('sold'),      value: seats?.sold      || 0, color: '#6B7A99', total: seats?.total || 1 },
-    { label: t('refunded'),  value: seats?.refunded  || 0, color: '#EF4444', total: seats?.total || 1 },
+    { label: t('available'), value: seats?.available || 0, color: 'var(--blue)',  total: seats?.total || 1 },
+    { label: t('reserved'),  value: seats?.reserved  || 0, color: 'var(--gold)',  total: seats?.total || 1 },
+    { label: t('sold'),      value: seats?.sold      || 0, color: 'var(--t2)',    total: seats?.total || 1 },
+    { label: t('refunded'),  value: seats?.refunded  || 0, color: 'var(--red)',   total: seats?.total || 1 },
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-      {/* Title */}
-      <div className="fade-up">
-        <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#142258', marginBottom: '4px' }}>
+      {/* Title row */}
+      <div ref={titleRef} className="dash-title-row fade-up">
+        <div className="eyebrow">
+          <i className="fa-solid fa-chart-pie" style={{ fontSize: '.6rem' }} />
           {t('managerDashboard')}
-        </h2>
-        <p style={{ color: '#6B7A99', fontSize: '0.88rem' }}>
-          <i className="fa-solid fa-server" style={{ marginRight: '6px', color: '#C2CEFE' }} />
+        </div>
+        <div className="h1">{t('managerDashboard')}</div>
+        <p className="h-sub">
+          <span className="h-sub-dot" />
           {nodeInfo?.nodeName} (#{nodeInfo?.nodeId}) &middot; {t('realtimeUpdate')}
         </p>
       </div>
 
       {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }} className="fade-up-1">
+      <div className="dash-kpis" ref={kpiRef}>
         {kpis.map(({ label, value, sub, icon, color, bg, accent }) => (
-          <div key={label} className="stat-card">
-            <div className="stat-card-top" style={{ background: accent }} />
-            <div className="icon-badge" style={{ background: bg }}>
+          <div key={label} className="kpi">
+            <div className="kpi-accent" style={{ background: accent }} />
+            <div className="kpi-icon" style={{ background: bg }}>
               <i className={`fa-solid ${icon}`} style={{ color }} />
             </div>
-            <p style={{ fontSize: '1.7rem', fontWeight: 800, color, lineHeight: 1, marginBottom: '3px' }}>{value}</p>
-            <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#142258', letterSpacing: '0.04em', marginBottom: '2px' }}>{label}</p>
-            <p style={{ fontSize: '0.72rem', color: '#6B7A99' }}>{sub}</p>
+            <div className="kpi-val" style={{ color }}>{value}</div>
+            <div className="kpi-lbl">{label}</div>
+            <div className="kpi-sub">{sub}</div>
           </div>
         ))}
       </div>
 
       {/* Middle row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div className="dash-grid" ref={gridRef}>
 
         {/* Seat status */}
-        <div className="card fade-up-2">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <i className="fa-solid fa-grid-2" style={{ color: '#3960FB', fontSize: '0.85rem' }} />
-            <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#6B7A99', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {t('seatStatus')}
-            </p>
+        <div className="dash-card">
+          <div className="dc-head">
+            <div className="dc-head-icon">
+              <i className="fa-solid fa-grid-2" />
+            </div>
+            <div className="dc-head-lbl">{t('seatStatus')}</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {seatRows.map(({ label, value, color, total }) => (
-              <div key={label}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#142258' }}>{label}</span>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color }}>{value}</span>
+              <div key={label} className="progress-row">
+                <div className="pr-top">
+                  <span className="pr-name">{label}</span>
+                  <span className="pr-val" style={{ color }}>{value}</span>
                 </div>
                 <ProgressBar value={value} max={total} color={color} />
               </div>
@@ -109,33 +167,43 @@ export default function Dashboard({ data }) {
         </div>
 
         {/* Revenue by class */}
-        <div className="card fade-up-2">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <i className="fa-solid fa-chart-bar" style={{ color: '#3960FB', fontSize: '0.85rem' }} />
-            <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#6B7A99', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {t('revenueByClass')}
-            </p>
+        <div className="dash-card">
+          <div className="dc-head">
+            <div className="dc-head-icon">
+              <i className="fa-solid fa-chart-bar" />
+            </div>
+            <div className="dc-head-lbl">{t('revenueByClass')}</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {[
-              { label: t('firstClass'), icon: 'fa-star',  data: revenue?.first_class, color: '#D97706', bg: '#FEF9C3' },
-              { label: t('economy'),    icon: 'fa-plane', data: revenue?.economy,      color: '#3960FB', bg: '#EBEFFF' },
-            ].map(({ label, icon, data, color, bg }) => (
-              <div key={label} style={{ background: bg, borderRadius: '14px', padding: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                  <p style={{ fontWeight: 700, color: '#142258', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '7px' }}>
-                    <i className={`fa-solid ${icon}`} style={{ color, fontSize: '0.75rem' }} />
+              {
+                label: t('firstClass'), icon: 'fa-star', data: revenue?.first_class,
+                color: 'var(--gold)', bg: 'var(--gl)', border: 'rgba(240,160,32,.2)'
+              },
+              {
+                label: t('economy'), icon: 'fa-plane', data: revenue?.economy,
+                color: 'var(--blue)', bg: 'var(--bl)', border: 'rgba(75,130,255,.2)'
+              },
+            ].map(({ label, icon, data, color, bg, border }) => (
+              <div key={label} className="revenue-block" style={{ background: bg, borderColor: border }}>
+                <div className="rb-top">
+                  <div className="rb-name" style={{ color }}>
+                    <div className="rb-icon" style={{ background: 'rgba(255,255,255,.5)' }}>
+                      <i className={`fa-solid ${icon}`} style={{ color, fontSize: '.72rem' }} />
+                    </div>
                     {label}
-                  </p>
-                  <p style={{ fontWeight: 800, color, fontSize: '1.1rem' }}>
+                  </div>
+                  <div className="rb-amount" style={{ color }}>
                     ${(data?.total_revenue || 0).toLocaleString()}
-                  </p>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '16px' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#6B7A99' }}>
+                <div className="rb-meta">
+                  <span>
+                    <i className="fa-solid fa-ticket" />
                     {data?.tickets_sold || 0} {t('tickets')}
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: '#6B7A99' }}>
+                  <span>
+                    <i className="fa-solid fa-chart-line" />
                     {t('average')} ${(data?.average_price || 0).toLocaleString()}
                   </span>
                 </div>
@@ -146,72 +214,84 @@ export default function Dashboard({ data }) {
       </div>
 
       {/* Bottom row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div className="dash-grid">
 
         {/* Flights */}
-        <div className="card fade-up-3">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <i className="fa-solid fa-plane-circle-check" style={{ color: '#3960FB', fontSize: '0.85rem' }} />
-            <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#6B7A99', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {t('flightStatus')}
-            </p>
+        <div className="dash-card">
+          <div className="dc-head">
+            <div className="dc-head-icon">
+              <i className="fa-solid fa-plane-circle-check" />
+            </div>
+            <div className="dc-head-lbl">{t('flightStatus')}</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div>
             {[
-              { label: t('totalFlights'),     value: flights?.total_flights || 0, color: '#142258' },
-              { label: t('scheduledFlights'), value: flights?.scheduled     || 0, color: '#3960FB' },
-              { label: t('upcoming'),         value: flights?.upcoming      || 0, color: '#0CAF60' },
-              { label: t('delayed'),          value: flights?.delayed       || 0, color: '#CA8A04' },
-              { label: t('cancelled'),        value: flights?.cancelled     || 0, color: '#EF4444' },
+              { label: t('totalFlights'),     value: flights?.total_flights || 0, color: 'var(--text)' },
+              { label: t('scheduledFlights'), value: flights?.scheduled     || 0, color: 'var(--blue)' },
+              { label: t('upcoming'),         value: flights?.upcoming      || 0, color: 'var(--green)' },
+              { label: t('delayed'),          value: flights?.delayed       || 0, color: 'var(--gold)' },
+              { label: t('cancelled'),        value: flights?.cancelled     || 0, color: 'var(--red)' },
             ].map(({ label, value, color }) => (
-              <div key={label} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 0', borderBottom: '1px solid #EBEFFF',
-              }}>
-                <span style={{ fontSize: '0.88rem', color: '#142258', fontWeight: 500 }}>{label}</span>
-                <span style={{ fontSize: '0.95rem', fontWeight: 800, color }}>{value}</span>
+              <div key={label} className="flight-stat-row">
+                <span className="fsr-lbl">{label}</span>
+                <span className="fsr-val" style={{ color }}>{value}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Vector clock */}
-        <div className="card fade-up-3">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-            <i className="fa-solid fa-clock-rotate-left" style={{ color: '#3960FB', fontSize: '0.85rem' }} />
-            <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#6B7A99', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {t('vectorClock')}
-            </p>
+        <div className="dash-card">
+          <div className="dc-head">
+            <div className="dc-head-icon">
+              <i className="fa-solid fa-clock-rotate-left" />
+            </div>
+            <div className="dc-head-lbl">{t('vectorClock')}</div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <div className="vc-boxes">
             {Object.entries(vc).map(([node, val]) => (
-              <div key={node} style={{
-                flex: 1, textAlign: 'center',
-                background: '#EBEFFF', borderRadius: '12px', padding: '14px 8px',
-              }}>
-                <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#3960FB', lineHeight: 1, marginBottom: '3px' }}>{val}</p>
-                <p style={{ fontSize: '0.65rem', fontWeight: 600, color: '#6B7A99', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  {node.replace('_', ' ')}
-                </p>
-              </div>
+              <VcBox key={node} node={node} val={val} />
             ))}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div>
             {[
               { label: t('activeNode'), value: `${nodeInfo?.nodeName} (#${nodeInfo?.nodeId})` },
               { label: t('mode'),       value: sync?.mode || '—' },
               { label: t('lastSync'),   value: sync?.last_sync ? new Date(sync.last_sync).toLocaleString() : 'N/A' },
             ].map(({ label, value }) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #EBEFFF' }}>
-                <span style={{ fontSize: '0.78rem', color: '#6B7A99' }}>{label}</span>
-                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#142258' }}>{value}</span>
+              <div key={label} className="sync-row">
+                <span className="sr-lbl">{label}</span>
+                <span className="sr-val">{value}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function VcBox({ node, val }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const t = +val;
+    if (isNaN(t)) return;
+    gsap.fromTo({ v: 0 }, { v: t }, {
+      duration: 1.2,
+      delay: 0.7,
+      ease: 'power2.out',
+      onUpdate: function () {
+        if (ref.current) ref.current.textContent = Math.round(this.targets()[0].v);
+      }
+    });
+  }, [val]);
+  return (
+    <div className="vc-box">
+      <div className="vc-val" ref={ref}>0</div>
+      <div className="vc-node">{node.replace('_', ' ')}</div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# Aerolíneas Rafael Pabón - Sistema de Reservas Distribuido
+ # Aerolíneas Rafael Pabón - Sistema de Reservas Distribuido
 
 ## Requisitos previos
 
