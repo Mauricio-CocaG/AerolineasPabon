@@ -1116,13 +1116,13 @@
 .sp-panel {
   width: 100%; max-width: 1020px;
   display: flex; flex-direction: column;
-  background: rgba(6,12,34,0.86);
-  border: 1px solid rgba(75,130,255,0.22);
+  /* light mode: clean white card */
+  background: rgba(255,255,255,0.94);
+  border: 1px solid rgba(0,0,0,0.10);
   border-radius: 26px;
-  box-shadow: 0 32px 90px rgba(0,0,0,.45),
-              0 0 0 1px rgba(75,130,255,.10),
-              inset 0 1px 0 rgba(255,255,255,.07);
-  /* backdrop-filter lives on ::before so overflow:visible is respected for dropdowns */
+  box-shadow: 0 20px 60px rgba(23,64,194,.12),
+              0 4px 16px rgba(0,0,0,.08),
+              inset 0 1px 0 rgba(255,255,255,1);
   position: relative; z-index: 10;
   overflow: visible;
   margin-bottom: 22px;
@@ -1131,10 +1131,22 @@
   content: '';
   position: absolute; inset: 0;
   border-radius: inherit;
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   z-index: -1;
   pointer-events: none;
+}
+/* dark mode: glass panel */
+[data-theme="dark"] .sp-panel {
+  background: rgba(6,12,34,0.86);
+  border: 1px solid rgba(75,130,255,0.22);
+  box-shadow: 0 32px 90px rgba(0,0,0,.45),
+              0 0 0 1px rgba(75,130,255,.10),
+              inset 0 1px 0 rgba(255,255,255,.07);
+}
+[data-theme="dark"] .sp-panel::before {
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
 }
 
 /* Panel rows */
@@ -1144,7 +1156,7 @@
 }
 .sp-row:first-child { z-index: 2; } /* row 1 above row 2 so dropdown clears it */
 .sp-row + .sp-row {
-  border-top: 1px solid rgba(75,130,255,0.10);
+  border-top: 1px solid var(--border);
 }
 
 /* ── Individual field ── */
@@ -1157,7 +1169,7 @@
 }
 .sp-airport-field { min-height: 86px; }
 .sp-row-bottom .sp-field { min-height: 70px; }
-.sp-field:hover { background: rgba(75,130,255,0.06); }
+.sp-field:hover { background: var(--s2); }
 .sp-field-dim { opacity: .45; cursor: not-allowed; }
 .sp-field-dim:hover { background: transparent; }
 
@@ -1339,4 +1351,74 @@
   .h2-stat-n { font-size: 1.3rem; }
   .sp-code   { font-size: 1.25rem; }
   .orbit-plane { display: none; }
+}
+
+/* ═══════════════════════════════════════════════
+   CUSTOM CURSOR
+═══════════════════════════════════════════════ */
+@media (pointer: fine) {
+  * { cursor: none !important; }
+}
+
+/* Tiny glowing dot — blue in light mode */
+.cursor-dot {
+  position: fixed;
+  top: -3px; left: -3px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 6px var(--blue), 0 0 14px var(--blue), 0 0 28px rgba(75,130,255,0.45);
+  pointer-events: none;
+  z-index: 999999;
+  will-change: transform;
+}
+/* White in dark mode */
+[data-theme="dark"] .cursor-dot {
+  background: #fff;
+  box-shadow: 0 0 6px #fff, 0 0 14px var(--blue), 0 0 28px rgba(75,130,255,0.35);
+}
+
+/* Falling star particles */
+.cursor-star {
+  position: fixed;
+  top: 0; left: 0;
+  pointer-events: none;
+  z-index: 999998;
+  line-height: 1;
+  user-select: none;
+  will-change: transform, opacity;
+  text-shadow: 0 0 6px currentColor;
+}
+
+/* ═══════════════════════════════════════════════
+   DASHBOARD — hover & transition polish
+═══════════════════════════════════════════════ */
+.kpi {
+  transition: box-shadow 0.22s ease;
+  will-change: transform;
+}
+.dash-card {
+  transition: box-shadow 0.22s ease;
+  will-change: transform;
+}
+.flight-stat-row {
+  transition: background 0.15s ease;
+  will-change: transform;
+}
+.flight-stat-row:hover {
+  background: var(--s2);
+  border-radius: 8px;
+}
+.revenue-block {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.revenue-block:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+}
+.vc-box {
+  transition: transform 0.2s ease;
+}
+.vc-box:hover {
+  transform: translateY(-3px) scale(1.04);
 }

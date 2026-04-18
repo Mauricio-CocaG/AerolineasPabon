@@ -90,6 +90,95 @@ function BgCanvas() {
   return null;
 }
 
+/* ── Cursor: small dot + falling-star trail ── */
+function CursorFollower() {
+  const dotRef = useRef(null);
+
+  useEffect(() => {
+    if (!window.matchMedia('(pointer: fine)').matches) return;
+    const dot = dotRef.current;
+    if (!dot) return;
+
+    gsap.set(dot, { opacity: 0 });
+
+    let shown = false;
+    let lastSpawnX = 0, lastSpawnY = 0;
+
+    const CHARS  = ['✦', '✧', '⋆', '·', '✺', '✴'];
+    const COLORS = ['#ffffff', '#93c5fd', '#a78bfa', '#67e8f9', '#4B82FF'];
+
+    const spawnStar = (x, y, burst = false) => {
+      const count = burst ? 6 : 1;
+      for (let i = 0; i < count; i++) {
+        const el = document.createElement('span');
+        el.className   = 'cursor-star';
+        el.textContent = CHARS[Math.floor(Math.random() * CHARS.length)];
+        document.body.appendChild(el);
+
+        const size = burst
+          ? Math.random() * 9 + 7
+          : Math.random() * 7 + 5;
+        const angle = burst ? (i / count) * Math.PI * 2 + Math.random() * 0.6 : 0;
+        const speed = burst ? Math.random() * 55 + 30 : 0;
+        const vx = burst ? Math.cos(angle) * speed : (Math.random() - 0.5) * 28;
+        const vy = burst ? Math.sin(angle) * speed : Math.random() * 22 + 8;
+        const dur = burst
+          ? Math.random() * 0.25 + 0.45
+          : Math.random() * 0.35 + 0.55;
+
+        gsap.set(el, {
+          x: x, y: y,
+          fontSize: size + 'px',
+          color: COLORS[Math.floor(Math.random() * COLORS.length)],
+          opacity: burst ? Math.random() * 0.3 + 0.7 : Math.random() * 0.45 + 0.55,
+          rotation: Math.random() * 360,
+        });
+
+        gsap.to(el, {
+          x: `+=${vx}`, y: `+=${vy}`,
+          opacity: 0,
+          scale: 0.1,
+          rotation: `+=${(Math.random() - 0.5) * 300}`,
+          duration: dur,
+          ease: burst ? 'power2.out' : 'power1.out',
+          onComplete: () => el.remove(),
+        });
+      }
+    };
+
+    const move = (e) => {
+      if (!shown) { gsap.to(dot, { opacity: 1, duration: 0.3 }); shown = true; }
+      gsap.set(dot, { x: e.clientX, y: e.clientY });
+
+      const dx   = e.clientX - lastSpawnX;
+      const dy   = e.clientY - lastSpawnY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 14) {
+        spawnStar(e.clientX, e.clientY, false);
+        lastSpawnX = e.clientX;
+        lastSpawnY = e.clientY;
+      }
+    };
+
+    const click = (e) => {
+      gsap.timeline()
+        .to(dot, { scale: 0.4, duration: 0.08, ease: 'power2.in' })
+        .to(dot, { scale: 1,   duration: 0.35, ease: 'back.out(3)' });
+      spawnStar(e.clientX, e.clientY, true);
+    };
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('click', click);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('click', click);
+    };
+  }, []);
+
+  return <div ref={dotRef} className="cursor-dot" />;
+}
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const geo = useGeolocation();
@@ -242,6 +331,7 @@ export default function App() {
 
   return (
     <>
+      <CursorFollower />
       {/* Animated canvas (draws into the #bg-canvas in index.html) */}
       <BgCanvas />
 
