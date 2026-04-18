@@ -1,24 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
+import ItineraryBooking from './ItineraryBooking';
 
 export default function FlightSearch({ apiUrl, onFlightSelect }) {
   const API_URL = apiUrl || 'http://localhost:3001/api/v1';
   const { t } = useTranslation();
 
-  // Estados de búsqueda
   const [originAirports, setOriginAirports] = useState([]);
   const [destinationAirports, setDestinationAirports] = useState([]);
   const [origin, setOrigin] = useState(null);
   const [destination, setDestination] = useState(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [flights, setFlights] = useState([]);
+
+  const [routeOptions, setRouteOptions] = useState(null);
+  const [directFlights, setDirectFlights] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [dateRange, setDateRange] = useState({ min: '', max: '' });
 
-  // Dropdown states
   const [originDropdownOpen, setOriginDropdownOpen] = useState(false);
   const [destDropdownOpen, setDestDropdownOpen] = useState(false);
   const [originSearchTerm, setOriginSearchTerm] = useState('');
@@ -26,96 +28,44 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
   const [originFiltered, setOriginFiltered] = useState([]);
   const [destFiltered, setDestFiltered] = useState([]);
 
-  // Paginación
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [totalResults, setTotalResults] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [hasPrev, setHasPrev] = useState(false);
 
-  // Refs
+  const [selectedItinerary, setSelectedItinerary] = useState(null);
+  const [selectedItineraryLabel, setSelectedItineraryLabel] = useState('');
+
   const originRef = useRef(null);
   const destRef = useRef(null);
-
-  const getAirportName = (code) => {
-    const names = {
-      ATL: 'Hartsfield-Jackson Atlanta Intl',
-      PEK: 'Beijing Capital Intl',
-      DXB: 'Dubai International',
-      TYO: 'Tokyo Haneda Intl',
-      LON: 'London Heathrow',
-      LAX: 'Los Angeles Intl',
-      PAR: 'Charles de Gaulle',
-      FRA: 'Frankfurt Airport',
-      IST: 'Istanbul Airport',
-      SIN: 'Singapore Changi',
-      MAD: 'Madrid-Barajas',
-      AMS: 'Amsterdam Schiphol',
-      DFW: 'Dallas/Fort Worth',
-      CAN: 'Guangzhou Baiyun',
-      SAO: 'São Paulo Guarulhos'
-    };
-    return names[code] || `${code} Airport`;
-  };
-
-  const getCityName = (code) => {
-    const cities = {
-      ATL: 'Atlanta',
-      PEK: 'Beijing',
-      DXB: 'Dubai',
-      TYO: 'Tokyo',
-      LON: 'London',
-      LAX: 'Los Angeles',
-      PAR: 'Paris',
-      FRA: 'Frankfurt',
-      IST: 'Istanbul',
-      SIN: 'Singapore',
-      MAD: 'Madrid',
-      AMS: 'Amsterdam',
-      DFW: 'Dallas',
-      CAN: 'Guangzhou',
-      SAO: 'São Paulo'
-    };
-    return cities[code] || code;
-  };
-
-  const getCountryName = (code) => {
-    const countries = {
-      ATL: 'USA',
-      PEK: 'CHINA',
-      DXB: 'UAE',
-      TYO: 'JAPAN',
-      LON: 'UK',
-      LAX: 'USA',
-      PAR: 'FRANCE',
-      FRA: 'GERMANY',
-      IST: 'TURKEY',
-      SIN: 'SINGAPORE',
-      MAD: 'SPAIN',
-      AMS: 'NETHERLANDS',
-      DFW: 'USA',
-      CAN: 'CHINA',
-      SAO: 'BRAZIL'
-    };
-    return countries[code] || '';
-  };
 
   const mapAirportCodes = (codes = []) =>
     codes.map((code) => ({
       code,
-      name: getAirportName(code),
-      city: getCityName(code),
-      country: getCountryName(code)
+      name: code,
+      city: code,
+      country: ''
     }));
 
-  // Cargar orígenes reales
+  const mapReachableDestinations = (items = []) =>
+    items.map((item) => ({
+      code: item.code,
+      name: item.code,
+      city: item.code,
+      country: '',
+      totalCost: item.totalCost,
+      totalTime: item.totalTime,
+      stops: item.stops,
+      route: item.route || []
+    }));
+
   useEffect(() => {
     const fetchOrigins = async () => {
       try {
         const response = await axios.get(`${API_URL}/flights/valid-origins`);
         if (response.data.success) {
-          const airportList = mapAirportCodes(response.data.origins || []);
-          setOriginAirports(airportList);
+          setOriginAirports(mapAirportCodes(response.data.origins || []));
         }
       } catch (error) {
         console.error('Error fetching valid origins:', error);
@@ -125,7 +75,6 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
     fetchOrigins();
   }, [API_URL]);
 
-  // Cargar destinos válidos según origen
   useEffect(() => {
     const fetchDestinations = async () => {
       if (!origin) {
@@ -141,7 +90,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
         });
 
         if (response.data.success) {
-          const airportList = mapAirportCodes(response.data.destinations || []);
+          const airportList = mapReachableDestinations(response.data.destinations || []);
           setDestinationAirports(airportList);
 
           if (destination && !airportList.some((a) => a.code === destination.code)) {
@@ -150,18 +99,21 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
             setStartDate('');
             setEndDate('');
             setDateRange({ min: '', max: '' });
+            setRouteOptions(null);
+            setDirectFlights([]);
+            setSelectedItinerary(null);
+            setSelectedItineraryLabel('');
           }
         }
       } catch (error) {
-        console.error('Error fetching valid destinations:', error);
+        console.error('Error fetching reachable destinations:', error);
         setDestinationAirports([]);
       }
     };
 
     fetchDestinations();
-  }, [API_URL, origin]);
+  }, [API_URL, origin]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cargar rango de fechas cuando origen y destino cambian
   useEffect(() => {
     if (origin && destination) {
       fetchAvailableDates();
@@ -170,37 +122,32 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
       setStartDate('');
       setEndDate('');
     }
-  }, [origin, destination]);
+  }, [origin, destination]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filtrar orígenes
   useEffect(() => {
     const filtered = originAirports
       .filter(
         (a) =>
           (!destination || a.code !== destination.code) &&
-          (a.code.toLowerCase().includes(originSearchTerm.toLowerCase()) ||
-            a.city.toLowerCase().includes(originSearchTerm.toLowerCase()))
+          a.code.toLowerCase().includes(originSearchTerm.toLowerCase())
       )
       .slice(0, 8);
 
     setOriginFiltered(filtered);
   }, [originSearchTerm, originAirports, destination]);
 
-  // Filtrar destinos reales del origen seleccionado
   useEffect(() => {
     const filtered = destinationAirports
       .filter(
         (a) =>
           (!origin || a.code !== origin.code) &&
-          (a.code.toLowerCase().includes(destSearchTerm.toLowerCase()) ||
-            a.city.toLowerCase().includes(destSearchTerm.toLowerCase()))
+          a.code.toLowerCase().includes(destSearchTerm.toLowerCase())
       )
       .slice(0, 8);
 
     setDestFiltered(filtered);
   }, [destSearchTerm, destinationAirports, origin]);
 
-  // Cerrar dropdowns al hacer clic fuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (originRef.current && !originRef.current.contains(event.target)) {
@@ -235,43 +182,82 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
     }
   };
 
-  const searchFlights = async (page = 1) => {
-    if (!origin && !destination && !startDate && !endDate) {
-      setFlights([]);
+  const searchRouteOptions = async (page = 1) => {
+    if (!origin || !destination) {
+      setRouteOptions(null);
+      setDirectFlights([]);
       setSearched(true);
-      setTotalResults(0);
       return;
     }
 
     setLoading(true);
+
     try {
-      const params = {};
-      if (origin) params.origin = origin.code;
-      if (destination) params.destination = destination.code;
-      if (startDate) params.startDate = startDate;
-      if (endDate) params.endDate = endDate;
-      params.page = page;
-      params.limit = 20;
+      const routeResponse = await axios.get(`${API_URL}/routes/options`, {
+        params: {
+          origin: origin.code,
+          destination: destination.code
+        }
+      });
 
-      const response = await axios.get(`${API_URL}/flights`, { params });
+      if (routeResponse.data.success) {
+        setRouteOptions(routeResponse.data);
 
-      if (response.data.success) {
-        setFlights(response.data.data);
-        setCurrentPage(response.data.pagination.page);
-        setTotalPages(response.data.pagination.pages);
-        setTotalResults(response.data.pagination.total);
-        setHasNext(response.data.pagination.hasNext);
-        setHasPrev(response.data.pagination.hasPrev);
+        const cheapestRoute = routeResponse.data.cheapest;
+        const isDirectRoute =
+          cheapestRoute &&
+          cheapestRoute.found &&
+          Array.isArray(cheapestRoute.route) &&
+          cheapestRoute.route.length === 1;
+
+        if (isDirectRoute) {
+          const params = {
+            origin: origin.code,
+            destination: destination.code,
+            page,
+            limit: 20
+          };
+
+          if (startDate) params.startDate = startDate;
+          if (endDate) params.endDate = endDate;
+
+          const flightsResponse = await axios.get(`${API_URL}/flights`, { params });
+
+          if (flightsResponse.data.success) {
+            setDirectFlights(flightsResponse.data.data);
+            setCurrentPage(flightsResponse.data.pagination.page);
+            setTotalPages(flightsResponse.data.pagination.pages);
+            setTotalResults(flightsResponse.data.pagination.total);
+            setHasNext(flightsResponse.data.pagination.hasNext);
+            setHasPrev(flightsResponse.data.pagination.hasPrev);
+          } else {
+            setDirectFlights([]);
+            setTotalResults(0);
+          }
+        } else {
+          setDirectFlights([]);
+          setCurrentPage(1);
+          setTotalPages(0);
+          setTotalResults(0);
+          setHasNext(false);
+          setHasPrev(false);
+        }
       } else {
-        setFlights([]);
+        setRouteOptions(null);
+        setDirectFlights([]);
         setTotalResults(0);
       }
 
+      setSelectedItinerary(null);
+      setSelectedItineraryLabel('');
       setSearched(true);
     } catch (error) {
-      console.error('Error searching flights:', error);
-      setFlights([]);
+      console.error('Error searching route options:', error);
+      setRouteOptions(null);
+      setDirectFlights([]);
       setTotalResults(0);
+      setSelectedItinerary(null);
+      setSelectedItineraryLabel('');
       setSearched(true);
     } finally {
       setLoading(false);
@@ -280,16 +266,16 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
 
   const handleSearch = () => {
     setCurrentPage(1);
-    searchFlights(1);
+    searchRouteOptions(1);
   };
 
   const goToPage = (newPage) => {
     if (newPage >= 1 && newPage <= totalPages) {
-      searchFlights(newPage);
+      searchRouteOptions(newPage);
     }
   };
 
-  const swapLocations = async () => {
+  const swapLocations = () => {
     if (!origin && !destination) return;
 
     const oldOrigin = origin;
@@ -298,17 +284,22 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
     setOrigin(oldDestination || null);
     setDestination(oldOrigin || null);
 
-    setOriginSearchTerm(oldDestination ? oldDestination.city : '');
-    setDestSearchTerm(oldOrigin ? oldOrigin.city : '');
+    setOriginSearchTerm(oldDestination ? oldDestination.code : '');
+    setDestSearchTerm(oldOrigin ? oldOrigin.code : '');
 
     setStartDate('');
     setEndDate('');
     setDateRange({ min: '', max: '' });
+    setRouteOptions(null);
+    setDirectFlights([]);
+    setSearched(false);
+    setSelectedItinerary(null);
+    setSelectedItineraryLabel('');
   };
 
   const selectOrigin = (airport) => {
     setOrigin(airport);
-    setOriginSearchTerm(airport.city);
+    setOriginSearchTerm(airport.code);
     setOriginDropdownOpen(false);
 
     if (!destination || destination.code === airport.code) {
@@ -319,15 +310,25 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
     setStartDate('');
     setEndDate('');
     setDateRange({ min: '', max: '' });
+    setRouteOptions(null);
+    setDirectFlights([]);
+    setSearched(false);
+    setSelectedItinerary(null);
+    setSelectedItineraryLabel('');
   };
 
   const selectDestination = (airport) => {
     setDestination(airport);
-    setDestSearchTerm(airport.city);
+    setDestSearchTerm(airport.code);
     setDestDropdownOpen(false);
 
     setStartDate('');
     setEndDate('');
+    setRouteOptions(null);
+    setDirectFlights([]);
+    setSearched(false);
+    setSelectedItinerary(null);
+    setSelectedItineraryLabel('');
   };
 
   const formatDate = (dateStr) => {
@@ -342,8 +343,166 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
-    return timeStr.substring(0, 5);
+    return String(timeStr).substring(0, 5);
   };
+
+  const formatMoney = (amount) => {
+    return `$${Number(amount || 0).toLocaleString()}`;
+  };
+
+  const formatDuration = (hours) => {
+    const totalHours = Number(hours || 0);
+    const h = Math.floor(totalHours);
+    const m = Math.round((totalHours - h) * 60);
+    return m > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${h}h`;
+  };
+
+  const openItineraryBooking = (routeObj, label) => {
+    setSelectedItinerary(routeObj);
+    setSelectedItineraryLabel(label);
+  };
+
+  const renderRouteSummary = (routeObj, title) => {
+    if (!routeObj || !routeObj.found) return null;
+
+    const isDirect = Array.isArray(routeObj.route) && routeObj.route.length === 1;
+
+    return (
+      <div
+        style={{
+          padding: '18px',
+          background: '#fff',
+          borderRadius: '20px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          marginBottom: '14px'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, color: '#142258', marginBottom: '8px' }}>{title}</div>
+            <div style={{ fontSize: '0.9rem', color: '#3960FB', fontWeight: 700, marginBottom: '10px' }}>
+              {routeObj.origin} → {routeObj.destination}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  background: '#F1F5FF',
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  color: '#1A2EB5',
+                  fontWeight: 700
+                }}
+              >
+                {routeObj.stops === 0 ? 'Directo' : `${routeObj.stops} escala(s)`}
+              </span>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  background: '#F8FAFC',
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  color: '#6B7A99',
+                  fontWeight: 700
+                }}
+              >
+                Tiempo total: {formatDuration(routeObj.totalTime)}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {routeObj.route.map((segment, index) => (
+                <div
+                  key={`${segment.from}-${segment.to}-${index}`}
+                  style={{
+                    padding: '10px 12px',
+                    background: '#F8FAFC',
+                    borderRadius: '14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#142258' }}>
+                    {segment.from} → {segment.to}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#6B7A99' }}>
+                    {formatMoney(segment.cost)} · {formatDuration(segment.time)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ minWidth: '180px', textAlign: 'right' }}>
+            <div style={{ fontSize: '0.65rem', color: '#B0BBD5', textTransform: 'uppercase', fontWeight: 700 }}>
+              Precio total
+            </div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3960FB' }}>
+              {formatMoney(routeObj.totalCost)}
+            </div>
+
+            {routeObj.route.length > 1 ? (
+              <div style={{ marginTop: '10px', fontSize: '0.78rem', color: '#A66B00', fontWeight: 700 }}>
+                Ruta con escalas
+              </div>
+            ) : (
+              <div style={{ marginTop: '10px', fontSize: '0.78rem', color: '#0CAF60', fontWeight: 700 }}>
+                Ruta directa
+              </div>
+            )}
+
+            {!isDirect && (
+              <button
+                type="button"
+                onClick={() => openItineraryBooking(routeObj, title)}
+                style={{
+                  marginTop: '14px',
+                  padding: '10px 16px',
+                  background: 'linear-gradient(135deg, #3960FB 0%, #1A2EB5 100%)',
+                  border: 'none',
+                  borderRadius: '999px',
+                  color: '#fff',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                Seleccionar itinerario
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (selectedItinerary) {
+    return (
+      <ItineraryBooking
+        apiUrl={API_URL}
+        routeOption={selectedItinerary}
+        startDate={startDate}
+        endDate={endDate}
+        classType="ECONOMY"
+        onCancel={() => {
+          setSelectedItinerary(null);
+          setSelectedItineraryLabel('');
+        }}
+        onComplete={(result) => {
+          if (onFlightSelect) {
+            onFlightSelect({
+              type: 'itinerary',
+              label: selectedItineraryLabel,
+              route: selectedItinerary,
+              result
+            });
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div>
@@ -354,15 +513,22 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
         <p style={{ color: '#6B7A99', fontSize: '0.9rem' }}>{t('searchSubtitle')}</p>
       </div>
 
-      <div className="card fade-up" style={{ padding: '28px', marginBottom: '28px', background: '#ffffff', borderRadius: '24px' }}>
+      <div
+        className="card fade-up"
+        style={{ padding: '28px', marginBottom: '28px', background: '#ffffff', borderRadius: '24px' }}
+      >
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '16px', marginBottom: '24px' }}>
           <div ref={originRef} style={{ position: 'relative' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, color: '#142258', fontSize: '0.75rem' }}>
               <i className="fa-solid fa-plane-departure" style={{ marginRight: '6px' }} />
               {t('origin')}
             </label>
+
             <div
-              onClick={() => setOriginDropdownOpen(!originDropdownOpen)}
+              onClick={() => {
+                setOriginDropdownOpen(!originDropdownOpen);
+                if (origin) setOriginSearchTerm(origin.code);
+              }}
               style={{
                 border: originDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
                 borderRadius: '16px',
@@ -374,10 +540,19 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
               {origin ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
-                    <div style={{ fontWeight: 700, color: '#142258' }}>{origin.city}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{origin.country}</div>
+                    <div style={{ fontWeight: 700, color: '#142258' }}>{origin.code}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>Origen</div>
                   </div>
-                  <span style={{ background: '#F1F5FF', padding: '2px 8px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, color: '#3960FB' }}>
+                  <span
+                    style={{
+                      background: '#F1F5FF',
+                      padding: '2px 8px',
+                      borderRadius: '20px',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      color: '#3960FB'
+                    }}
+                  >
                     {origin.code}
                   </span>
                 </div>
@@ -387,39 +562,46 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
             </div>
 
             {originDropdownOpen && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                background: '#ffffff',
-                borderRadius: '16px',
-                boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
-                marginTop: '8px',
-                zIndex: 1000,
-                maxHeight: '320px',
-                overflowY: 'auto',
-                border: '1px solid #F1F5FF'
-              }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                  marginTop: '8px',
+                  zIndex: 1000,
+                  maxHeight: '320px',
+                  overflowY: 'auto',
+                  border: '1px solid #F1F5FF'
+                }}
+              >
                 <div style={{ padding: '12px', borderBottom: '1px solid #F1F5FF' }}>
                   <input
                     type="text"
-                    placeholder="Buscar ciudad o aeropuerto..."
+                    placeholder="Buscar aeropuerto..."
                     value={originSearchTerm}
                     onChange={(e) => {
-  const value = e.target.value;
-  setOriginSearchTerm(value);
+                      const value = e.target.value;
+                      setOriginSearchTerm(value);
 
-  if (value.trim() === '') {
-    setOrigin(null);
-    setDestination(null);
-    setDestinationAirports([]);
-    setDestSearchTerm('');
-    setStartDate('');
-    setEndDate('');
-    setDateRange({ min: '', max: '' });
-  }
-}}
+                      if (value.trim() === '') {
+                        setOrigin(null);
+                        setDestination(null);
+                        setDestinationAirports([]);
+                        setDestSearchTerm('');
+                        setStartDate('');
+                        setEndDate('');
+                        setDateRange({ min: '', max: '' });
+                        setRouteOptions(null);
+                        setDirectFlights([]);
+                        setSearched(false);
+                        setSelectedItinerary(null);
+                        setSelectedItineraryLabel('');
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -431,6 +613,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                     autoFocus
                   />
                 </div>
+
                 {originFiltered.map((airport) => (
                   <div
                     key={airport.code}
@@ -443,19 +626,18 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                       cursor: 'pointer',
                       borderBottom: '1px solid #F8FAFC'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '#ffffff')}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
                       <div>
-                        <div style={{ fontWeight: 700, color: '#142258' }}>{airport.city}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country}</div>
+                        <div style={{ fontWeight: 700, color: '#142258' }}>{airport.code}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>Aeropuerto</div>
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#B0BBD5' }}>{airport.name.substring(0, 20)}...</div>
                     </div>
                   </div>
                 ))}
@@ -485,8 +667,13 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
               <i className="fa-solid fa-plane-arrival" style={{ marginRight: '6px' }} />
               {t('destination')}
             </label>
+
             <div
-              onClick={() => setDestDropdownOpen(!destDropdownOpen)}
+              onClick={() => {
+                if (!origin) return;
+                setDestDropdownOpen(!destDropdownOpen);
+                if (destination) setDestSearchTerm(destination.code);
+              }}
               style={{
                 border: destDropdownOpen ? '2px solid #3960FB' : '1px solid #E2E8F0',
                 borderRadius: '16px',
@@ -497,14 +684,30 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
               }}
             >
               {destination ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
                   <div>
-                    <div style={{ fontWeight: 700, color: '#142258' }}>{destination.city}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{destination.country}</div>
+                    <div style={{ fontWeight: 700, color: '#142258' }}>{destination.code}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+                      {destination.stops === 0 ? 'Directo' : `${destination.stops} escala(s)`}
+                    </div>
                   </div>
-                  <span style={{ background: '#F1F5FF', padding: '2px 8px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700, color: '#3960FB' }}>
-                    {destination.code}
-                  </span>
+                  <div style={{ textAlign: 'right' }}>
+                    <span
+                      style={{
+                        background: '#F1F5FF',
+                        padding: '2px 8px',
+                        borderRadius: '20px',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        color: '#3960FB'
+                      }}
+                    >
+                      {destination.code}
+                    </span>
+                    <div style={{ fontSize: '0.72rem', color: '#1A2EB5', fontWeight: 700, marginTop: '4px' }}>
+                      {formatMoney(destination.totalCost)}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <span style={{ color: '#B0BBD5' }}>
@@ -514,35 +717,42 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
             </div>
 
             {destDropdownOpen && origin && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                background: '#ffffff',
-                borderRadius: '16px',
-                boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
-                marginTop: '8px',
-                zIndex: 1000,
-                maxHeight: '320px',
-                overflowY: 'auto',
-                border: '1px solid #F1F5FF'
-              }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                  marginTop: '8px',
+                  zIndex: 1000,
+                  maxHeight: '360px',
+                  overflowY: 'auto',
+                  border: '1px solid #F1F5FF'
+                }}
+              >
                 <div style={{ padding: '12px', borderBottom: '1px solid #F1F5FF' }}>
                   <input
                     type="text"
-                    placeholder="Buscar ciudad o aeropuerto..."
+                    placeholder="Buscar aeropuerto..."
                     value={destSearchTerm}
                     onChange={(e) => {
-  const value = e.target.value;
-  setDestSearchTerm(value);
+                      const value = e.target.value;
+                      setDestSearchTerm(value);
 
-  if (value.trim() === '') {
-    setDestination(null);
-    setStartDate('');
-    setEndDate('');
-  }
-}}
+                      if (value.trim() === '') {
+                        setDestination(null);
+                        setStartDate('');
+                        setEndDate('');
+                        setRouteOptions(null);
+                        setDirectFlights([]);
+                        setSearched(false);
+                        setSelectedItinerary(null);
+                        setSelectedItineraryLabel('');
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -554,6 +764,7 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                     autoFocus
                   />
                 </div>
+
                 {destFiltered.map((airport) => (
                   <div
                     key={airport.code}
@@ -564,24 +775,30 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
                       justifyContent: 'space-between',
                       padding: '14px 16px',
                       cursor: 'pointer',
-                      borderBottom: '1px solid #F8FAFC'
+                      borderBottom: '1px solid #F8FAFC',
+                      gap: '12px'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '#ffffff')}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
+                      <i className="fa-solid fa-route" style={{ color: '#3960FB' }} />
                       <div>
-                        <div style={{ fontWeight: 700, color: '#142258' }}>{airport.city}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{airport.country}</div>
+                        <div style={{ fontWeight: 700, color: '#142258' }}>{airport.code}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+                          {airport.stops === 0 ? 'Directo' : `${airport.stops} escala(s)`}
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontWeight: 700, color: '#3960FB' }}>{airport.code}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#B0BBD5' }}>{airport.name.substring(0, 20)}...</div>
+                      <div style={{ fontSize: '0.7rem', color: '#1A2EB5', fontWeight: 700 }}>
+                        {formatMoney(airport.totalCost)}
+                      </div>
                     </div>
                   </div>
                 ))}
+
                 {destFiltered.length === 0 && (
                   <div style={{ padding: '16px', color: '#6B7A99', textAlign: 'center' }}>
                     No hay destinos disponibles para ese origen
@@ -638,9 +855,11 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
           </div>
         </div>
 
-        {origin && destination && dateRange.min && dateRange.max && (
-          <div style={{ marginBottom: '16px', fontSize: '0.7rem', color: '#6B7A99', textAlign: 'center' }}>
-            📅 Vuelos disponibles entre {formatDate(dateRange.min)} y {formatDate(dateRange.max)}
+        {origin && destination && (
+          <div style={{ marginBottom: '16px', fontSize: '0.75rem', color: '#6B7A99', textAlign: 'center' }}>
+            {destination.stops === 0
+              ? `Ruta directa disponible · desde ${formatMoney(destination.totalCost)}`
+              : `Ruta alcanzable con ${destination.stops} escala(s) · desde ${formatMoney(destination.totalCost)}`}
           </div>
         )}
 
@@ -674,60 +893,162 @@ export default function FlightSearch({ apiUrl, onFlightSelect }) {
 
       {searched && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
-            <p style={{ fontWeight: 700, color: '#142258' }}>
-              {totalResults > 0 ? `${totalResults.toLocaleString()} vuelos encontrados` : 'No se encontraron vuelos'}
-            </p>
-            {totalPages > 0 && (
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={() => goToPage(currentPage - 1)} disabled={!hasPrev} style={{ padding: '6px 14px', borderRadius: '30px', border: '1px solid #E2E8F0', background: hasPrev ? '#fff' : '#F8FAFC', cursor: hasPrev ? 'pointer' : 'not-allowed' }}>← Anterior</button>
-                <span>Página {currentPage} de {totalPages}</span>
-                <button onClick={() => goToPage(currentPage + 1)} disabled={!hasNext} style={{ padding: '6px 14px', borderRadius: '30px', border: '1px solid #E2E8F0', background: hasNext ? '#fff' : '#F8FAFC', cursor: hasNext ? 'pointer' : 'not-allowed' }}>Siguiente →</button>
-              </div>
-            )}
-          </div>
+          {routeOptions?.success ? (
+            <div style={{ marginBottom: '24px' }}>
+              {renderRouteSummary(routeOptions.cheapest, 'Ruta más barata')}
+              {routeOptions.fastest &&
+              routeOptions.cheapest &&
+              JSON.stringify(routeOptions.fastest.route) !== JSON.stringify(routeOptions.cheapest.route)
+                ? renderRouteSummary(routeOptions.fastest, 'Ruta más rápida')
+                : null}
+            </div>
+          ) : null}
 
-          {flights.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {flights.map((flight) => (
-                <div key={flight.id} style={{ padding: '20px', background: '#fff', borderRadius: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ marginBottom: '8px' }}>
-                        <span style={{ fontWeight: 700 }}>{flight.flight_number}</span>
-                        <span style={{ marginLeft: '12px', fontSize: '0.7rem', background: '#E6FBF1', padding: '2px 8px', borderRadius: '20px', color: '#0CAF60' }}>{flight.status}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontSize: '1.5rem', fontWeight: 800 }}>{flight.origin_code}</span>
-                          <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{formatTime(flight.departure_time)}</div>
+          {directFlights.length > 0 ? (
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '20px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <p style={{ fontWeight: 700, color: '#142258' }}>
+                  {totalResults > 0
+                    ? `${totalResults.toLocaleString()} vuelo(s) directo(s) encontrados`
+                    : 'No se encontraron vuelos directos'}
+                </p>
+
+                {totalPages > 0 && (
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={!hasPrev}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '30px',
+                        border: '1px solid #E2E8F0',
+                        background: hasPrev ? '#fff' : '#F8FAFC',
+                        cursor: hasPrev ? 'pointer' : 'not-allowed'
+                      }}
+                    >
+                      ← Anterior
+                    </button>
+
+                    <span>Página {currentPage} de {totalPages}</span>
+
+                    <button
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={!hasNext}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '30px',
+                        border: '1px solid #E2E8F0',
+                        background: hasNext ? '#fff' : '#F8FAFC',
+                        cursor: hasNext ? 'pointer' : 'not-allowed'
+                      }}
+                    >
+                      Siguiente →
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {directFlights.map((flight) => (
+                  <div
+                    key={flight.id}
+                    style={{
+                      padding: '20px',
+                      background: '#fff',
+                      borderRadius: '20px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ marginBottom: '8px' }}>
+                          <span style={{ fontWeight: 700 }}>{flight.flight_number}</span>
+                          <span
+                            style={{
+                              marginLeft: '12px',
+                              fontSize: '0.7rem',
+                              background: '#E6FBF1',
+                              padding: '2px 8px',
+                              borderRadius: '20px',
+                              color: '#0CAF60'
+                            }}
+                          >
+                            {flight.status}
+                          </span>
                         </div>
-                        <div style={{ flex: 1, textAlign: 'center' }}>
-                          <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <span style={{ fontSize: '1.5rem', fontWeight: 800 }}>{flight.origin_code}</span>
+                            <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+                              {formatTime(flight.departure_time)}
+                            </div>
+                          </div>
+
+                          <div style={{ flex: 1, textAlign: 'center' }}>
+                            <i className="fa-solid fa-plane" style={{ color: '#3960FB' }} />
+                          </div>
+
+                          <div style={{ textAlign: 'center' }}>
+                            <span style={{ fontSize: '1.5rem', fontWeight: 800 }}>{flight.destination_code}</span>
+                            <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>
+                              {formatTime(flight.arrival_time || '--:--')}
+                            </div>
+                          </div>
                         </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontSize: '1.5rem', fontWeight: 800 }}>{flight.destination_code}</span>
-                          <div style={{ fontSize: '0.7rem', color: '#6B7A99' }}>{formatTime(flight.arrival_time || '--:--')}</div>
+
+                        <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#6B7A99' }}>
+                          {formatDate(flight.departure_date)} · Puerta {flight.gate || 'TBD'}
                         </div>
                       </div>
-                      <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#6B7A99' }}>
-                        {formatDate(flight.departure_date)} · Puerta {flight.gate || 'TBD'}
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.6rem', color: '#B0BBD5' }}>Desde</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3960FB' }}>
+                          {formatMoney(flight.economy_price || 250)}
+                        </div>
+                        <button
+                          onClick={() => onFlightSelect(flight)}
+                          style={{
+                            marginTop: '8px',
+                            padding: '8px 20px',
+                            background: '#3960FB',
+                            border: 'none',
+                            borderRadius: '30px',
+                            color: '#fff',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Seleccionar
+                        </button>
                       </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.6rem', color: '#B0BBD5' }}>Desde</div>
-                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3960FB' }}>${flight.economy_price || 250}</div>
-                      <button onClick={() => onFlightSelect(flight)} style={{ marginTop: '8px', padding: '8px 20px', background: '#3960FB', border: 'none', borderRadius: '30px', color: '#fff', cursor: 'pointer' }}>Seleccionar</button>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+          ) : routeOptions?.success ? (
+            <div style={{ textAlign: 'center', padding: '32px', background: '#fff', borderRadius: '24px' }}>
+              <p style={{ fontWeight: 700, color: '#142258', marginBottom: '8px' }}>
+                Se encontraron rutas óptimas para este destino.
+              </p>
+              <p style={{ fontSize: '0.9rem', color: '#6B7A99' }}>
+                Usa el botón <strong>Seleccionar itinerario</strong> en una de las rutas con escalas para continuar con la reserva o compra.
+              </p>
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '24px' }}>
-              <p>No se encontraron vuelos para los filtros seleccionados.</p>
+              <p>No se encontraron rutas para los filtros seleccionados.</p>
               <p style={{ fontSize: '0.8rem', color: '#6B7A99' }}>
-                Prueba con otras fechas entre {dateRange.min || 'marzo'} y {dateRange.max || 'abril'} 2026
+                Prueba con otro destino o con fechas entre {dateRange.min || 'marzo'} y {dateRange.max || 'abril'} 2026
               </p>
             </div>
           )}

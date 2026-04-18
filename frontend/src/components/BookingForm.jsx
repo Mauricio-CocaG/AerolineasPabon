@@ -93,8 +93,9 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
     if (!passport) return;
 
     setLookingUp(true);
+
     try {
-      const res = await axios.get(API_URL + '/passenger/search', {
+      const res = await axios.get(`${API_URL}/passenger/search`, {
         params: { passport }
       });
 
@@ -135,7 +136,7 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
       return passengerId;
     }
 
-    const pRes = await axios.post(API_URL + '/passenger', {
+    const pRes = await axios.post(`${API_URL}/passenger`, {
       passport_number: formData.passportNumber.trim(),
       first_name: formData.firstName.trim(),
       last_name: formData.lastName.trim(),
@@ -155,7 +156,7 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
     try {
       const ensuredPassengerId = await ensurePassenger();
 
-      const rRes = await axios.post(API_URL + '/seat/reserve', {
+      const rRes = await axios.post(`${API_URL}/seat/reserve`, {
         flightId: flight.id,
         seatNumber: seat.seat_number,
         passengerId: ensuredPassengerId,
@@ -163,7 +164,10 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
       });
 
       if (rRes.data.success) {
-        const expiresAt = rRes.data.expiresAt || rRes.data.seat?.reservation_expires_at || null;
+        const expiresAt =
+          rRes.data.expiresAt ||
+          rRes.data.seat?.reservation_expires_at ||
+          null;
 
         setReserved(true);
         setReservationExpiresAt(expiresAt);
@@ -184,7 +188,10 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
       setReservationExpiresAt(null);
       setFeedback({
         type: 'error',
-        message: err.response?.data?.error || err.message || 'Error al reservar el asiento.'
+        message:
+          err.response?.data?.error ||
+          err.message ||
+          'Error al reservar el asiento.'
       });
     } finally {
       setLoading(false);
@@ -198,9 +205,7 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
     try {
       const ensuredPassengerId = await ensurePassenger();
 
-      
-
-      const sRes = await axios.post(API_URL + '/seat/sell', {
+      const sRes = await axios.post(`${API_URL}/seat/sell`, {
         flightId: flight.id,
         seatNumber: seat.seat_number,
         passengerId: ensuredPassengerId,
@@ -271,7 +276,9 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
           >
             {t('passengerData')}
           </h2>
-          <p style={{ color: '#6B7A99', fontSize: '0.88rem' }}>{t('completeInfo')}</p>
+          <p style={{ color: '#6B7A99', fontSize: '0.88rem' }}>
+            {t('completeInfo')}
+          </p>
         </div>
 
         <div
@@ -634,12 +641,14 @@ export default function BookingForm({ apiUrl, flight, seat, onComplete, onCancel
               borderRadius: '999px',
               border: 'none',
               background: loading
-  ? '#BFD0FF'
-  : 'linear-gradient(135deg, #3960FB 0%, #1A2EB5 100%)',
-cursor: loading ? 'not-allowed' : 'pointer'
+                ? '#BFD0FF'
+                : 'linear-gradient(135deg, #3960FB 0%, #1A2EB5 100%)',
+              color: '#fff',
+              fontWeight: 800,
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
           >
-            {loading && reserved ? 'Comprando...' : 'Comprar'}
+            {loading ? 'Comprando...' : 'Comprar'}
           </button>
         </div>
       </div>
